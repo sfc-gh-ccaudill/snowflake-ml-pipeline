@@ -1,0 +1,61 @@
+snowflake:
+  connection_name: DEMO # Change to your connection name
+  database: ML_DEMO_PIPELINE_DB
+  schema: HEALTHCARE
+  warehouse: ML_DEMO_WAREHOUSE
+
+compute:
+  compute_pool: ML_DEMO_COMPUTE_POOL
+  instance_family: CPU_X64_S
+  min_nodes: 1
+  max_nodes: 3
+
+model:
+  model_name: PATIENT_RISK_MODEL
+  target_platforms:
+    - SNOWPARK_CONTAINER_SERVICES
+    - WAREHOUSE
+
+tables:
+  raw_data: RAW_PATIENT_DATA
+
+pipeline:
+  tune_hpo: false
+  hpo_num_samples: 20
+  hpo_search_alg: random
+  hpo_scheduler: asha
+  hpo_num_instances: 2
+
+feature_config:
+  raw_numeric_features:
+    - AGE
+    - BMI
+    - HEART_RATE
+    - SYSTOLIC_BP
+    - DIASTOLIC_BP
+    - TEMPERATURE
+    - RESPIRATORY_RATE
+    - OXYGEN_SATURATION
+    - GLUCOSE_LEVEL
+    - CREATININE
+    - HEMOGLOBIN
+    - WBC_COUNT
+    - COMORBIDITY_COUNT
+    - PREVIOUS_ADMISSIONS
+    - MEDICATION_COUNT
+  categorical_features:
+    - GENDER
+    - PRIMARY_DIAGNOSIS
+    - ADMISSION_TYPE
+    - INSURANCE_TYPE
+  computed_features:
+    - SHOCK_INDEX
+    - PULSE_PRESSURE
+    - BMI_CATEGORY
+    - VITAL_SIGNS_SEVERITY
+  target_column: RISK_LEVEL
+  class_labels:
+    - LOW
+    - MEDIUM
+    - HIGH
+    - CRITICAL
