@@ -42,52 +42,62 @@ _STEP_PROCEDURES = [
     {
         "proc_name": "RUN_FEATURE_ENGINEERING",
         "task_name": "PIPELINE_ROOT_TASK",
+        "task_key":  "feature_engineering",
         "imports": "source.pipeline.step1_feature_engineering",
         "step_func": "run",
         "description": "Step 1 — Feature Engineering & Feature Store",
         "after": None,
         "schedule": "USING CRON 0 2 * * 0 America/Los_Angeles",
         "when": None,
+        "is_final": False,
     },
     {
         "proc_name": "RUN_HPO",
         "task_name": "PIPELINE_HPO_TASK",
+        "task_key":  "hpo",
         "imports": "source.pipeline.step2b_hpo",
         "step_func": "run",
         "description": "Step 2b — Hyperparameter Tuning (skips internally if tune_hpo=false)",
         "after": "PIPELINE_ROOT_TASK",
         "schedule": None,
         "when": None,
+        "is_final": False,
     },
     {
         "proc_name": "RUN_TRAIN_EVALUATE",
         "task_name": "PIPELINE_TRAIN_TASK",
+        "task_key":  "training",
         "imports": "source.pipeline.step2_train_evaluate",
         "step_func": "run",
         "description": "Step 2 — Distributed Training & Evaluation",
         "after": "PIPELINE_HPO_TASK",
         "schedule": None,
         "when": None,
+        "is_final": False,
     },
     {
         "proc_name": "RUN_DEPLOY",
         "task_name": "PIPELINE_DEPLOY_TASK",
+        "task_key":  "deployment",
         "imports": "source.pipeline.step3_deploy",
         "step_func": "run",
         "description": "Step 3 — REST Endpoint Deployment",
         "after": "PIPELINE_TRAIN_TASK",
         "schedule": None,
         "when": None,
+        "is_final": False,
     },
     {
         "proc_name": "RUN_MONITOR_SETUP",
         "task_name": "PIPELINE_MONITOR_TASK",
+        "task_key":  "monitoring",
         "imports": "source.pipeline.step4_monitor",
         "step_func": "run",
         "description": "Step 4 — Model Monitor Setup",
         "after": "PIPELINE_DEPLOY_TASK",
         "schedule": None,
         "when": None,
+        "is_final": True,
     },
 ]
 
@@ -159,7 +169,15 @@ def _serialize_config(config) -> str:
     return json.dumps(d)
 
 
-def _build_handler(step_import: str, step_func: str, config_json: str, predecessor_task: str = None) -> str:
+def _build_handler(
+    step_import: str,
+    step_func: str,
+    config_json: str,
+    predecessor_task: str = None,
+    task_key: str = "",
+    task_name: str = "",
+    is_final: bool = False,
+) -> str:
     pred_block = ""
     if predecessor_task:
         pred_block = (
@@ -172,13 +190,6 @@ def _build_handler(step_import: str, step_func: str, config_json: str, predecess
             "    except Exception:\n"
             "        pass\n"
         )
-    result_block = (
-        f"    result = {step_func}(config, session)\n"
-        "    if not isinstance(result, dict):\n"
-        "        result = dict(result=result)\n"
-        "    result['_pipeline_config'] = config_dict\n"
-        "    return result\n"
-    )
     return (
         "import sys\n"
         "def handler(session):\n"
@@ -188,6 +199,7 @@ def _build_handler(step_import: str, step_func: str, config_json: str, predecess
         "                        format='%(asctime)s %(levelname)s %(name)s - %(message)s')\n"
         f"    from {step_import} import {step_func}\n"
         "    from source.configs import get_config_from_dict\n"
+        "    from source.pipeline.execution_log import PipelineExecutionLogger\n"
         f"    config_dict = json.loads('{config_json}')\n"
         + pred_block +
         "    try:\n"
@@ -204,7 +216,26 @@ def _build_handler(step_import: str, step_func: str, config_json: str, predecess
         "    except Exception:\n"
         "        pass\n"
         "    config = get_config_from_dict(config_dict)\n"
-        + result_block
+        f"    _db = config_dict.get('snowflake', {{}}).get('database', '')\n"
+        f"    _sc = config_dict.get('snowflake', {{}}).get('schema', '')\n"
+        f"    _log = PipelineExecutionLogger(session, _db, _sc)\n"
+        f"    _run_id, _t0 = _log.log_task_start('{task_key}', '{task_name}')\n"
+        "    try:\n"
+        f"        result = {step_func}(config, session)\n"
+        "        if not isinstance(result, dict):\n"
+        "            result = {'result': result}\n"
+        "        _status = result.get('status', 'success')\n"
+        "        if _status not in ('skipped', 'failed'):\n"
+        "            _status = 'success'\n"
+        f"        _log.log_task_end(_run_id, '{task_key}', _t0, _status, details=result, is_final={is_final})\n"
+        "    except Exception as _exc:\n"
+        "        try:\n"
+        f"            _log.log_task_end(_run_id, '{task_key}', _t0, 'failed', details={{'error': str(_exc)}}, is_final={is_final})\n"
+        "        except Exception:\n"
+        "            pass\n"
+        "        raise\n"
+        "    result['_pipeline_config'] = config_dict\n"
+        "    return result\n"
     )
 
 
@@ -219,12 +250,18 @@ def _create_stored_procedure(
     stage: str,
     config_json: str,
     predecessor_task: str = None,
+    task_key: str = "",
+    task_name: str = "",
+    is_final: bool = False,
 ) -> None:
     """Create or replace a stored procedure that wraps one pipeline step."""
     full_proc = f"{db}.{schema}.{proc_name}"
     logger.info("Creating stored procedure: %s", full_proc)
 
-    handler_body = _build_handler(step_import, step_func, config_json, predecessor_task)
+    handler_body = _build_handler(
+        step_import, step_func, config_json, predecessor_task,
+        task_key=task_key, task_name=task_name, is_final=is_final,
+    )
 
     session.sql(f"""
         CREATE OR REPLACE PROCEDURE {full_proc}()
@@ -326,6 +363,9 @@ def create_dag(session: Session, config) -> None:
 
     config_json = _serialize_config(config)
 
+    from source.pipeline.execution_log import PipelineExecutionLogger
+    PipelineExecutionLogger.ensure_table(session, db, schema)
+
     for step in _STEP_PROCEDURES:
         _create_stored_procedure(
             session=session,
@@ -338,6 +378,9 @@ def create_dag(session: Session, config) -> None:
             stage=stage,
             config_json=config_json,
             predecessor_task=step.get("after"),
+            task_key=step["task_key"],
+            task_name=step["task_name"],
+            is_final=step.get("is_final", False),
         )
 
     for step in _STEP_PROCEDURES:

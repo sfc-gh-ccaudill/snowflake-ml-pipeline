@@ -32,19 +32,22 @@ _HPO_SEARCH_SPACE = {
 
 
 def run(config, session: Session) -> dict:
-    if not config.pipeline.tune_hpo:
-        logger.info("tune_hpo is False — skipping hyperparameter tuning")
-        return {"status": "skipped", "reason": "tune_hpo=false"}
     """
     Submit a Ray Tune HPO job and wait for completion.
+
+    Returns {"status": "skipped"} immediately when config.pipeline.tune_hpo is False.
 
     Args:
         config: PipelineConfig (pipeline.hpo_* fields control the search).
         session: Active Snowpark session.
 
     Returns:
-        dict with keys: status, job_id, best_score, best_params.
+        dict with keys: status, job_id, best_score, best_params  — or
+        {"status": "skipped", "reason": "tune_hpo=false"} when skipped.
     """
+    if not config.pipeline.tune_hpo:
+        logger.info("tune_hpo is False — skipping hyperparameter tuning")
+        return {"status": "skipped", "reason": "tune_hpo=false"}
     from source.framework.train import RayHPOConfig, RemoteTrainer
 
     db = config.snowflake.database
