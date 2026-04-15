@@ -49,6 +49,7 @@ def run(config, session: Session) -> dict:
         logger.info("tune_hpo is False — skipping hyperparameter tuning")
         return {"status": "skipped", "reason": "tune_hpo=false"}
     from source.framework.train import RayHPOConfig, RemoteTrainer
+    from source.configs import config_to_dict
 
     db = config.snowflake.database
     schema = config.snowflake.schema_name
@@ -85,6 +86,7 @@ def run(config, session: Session) -> dict:
         hpo_config=hpo_config,
         entrypoint="train_hpo.py",
         num_instances=pipeline_cfg.hpo_num_instances,
+        env_vars={"ML_PIPELINE_CONFIG": json.dumps(config_to_dict(config))},
     )
 
     logger.info("HPO job submitted: %s", job.id)

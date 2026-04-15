@@ -125,6 +125,45 @@ def get_config_from_dict(config_dict: dict) -> PipelineConfig:
     )
 
 
+def config_to_dict(config: "PipelineConfig") -> dict:
+    """Serialize a PipelineConfig to the canonical dict format accepted by get_config_from_dict."""
+    return {
+        "snowflake": {
+            "connection_name": config.snowflake.connection_name,
+            "database": config.snowflake.database,
+            "schema": config.snowflake.schema_name,
+            "warehouse": config.snowflake.warehouse,
+        },
+        "compute": {
+            "compute_pool": config.compute.compute_pool,
+            "instance_family": config.compute.instance_family,
+            "min_nodes": config.compute.min_nodes,
+            "max_nodes": config.compute.max_nodes,
+        },
+        "model": {
+            "model_name": config.model.model_name,
+            "target_platforms": config.model.target_platforms,
+        },
+        "tables": {
+            "raw_data": config.tables.raw_data,
+        },
+        "feature_config": {
+            "raw_numeric_features": config.feature_config.raw_numeric_features,
+            "categorical_features": config.feature_config.categorical_features,
+            "computed_features": config.feature_config.computed_features,
+            "target_column": config.feature_config.target_column,
+            "class_labels": config.feature_config.class_labels,
+        },
+        "pipeline": {
+            "tune_hpo": config.pipeline.tune_hpo,
+            "hpo_num_samples": config.pipeline.hpo_num_samples,
+            "hpo_search_alg": config.pipeline.hpo_search_alg,
+            "hpo_scheduler": config.pipeline.hpo_scheduler,
+            "hpo_num_instances": config.pipeline.hpo_num_instances,
+        },
+    }
+
+
 def get_config(config_path: str = "config.yaml") -> PipelineConfig:
     config_dict = load_config(config_path)
 

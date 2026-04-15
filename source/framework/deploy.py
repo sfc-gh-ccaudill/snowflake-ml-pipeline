@@ -82,7 +82,6 @@ class ModelDeployer:
         service_name: str,
         compute_pool: str,
         version_name: Optional[str] = None,
-        min_instances: int = 1,
         max_instances: int = 3,
         gpu_requests: Optional[str] = None,
         timeout_secs: int = _SERVICE_READY_TIMEOUT_SECS,
@@ -113,12 +112,11 @@ class ModelDeployer:
             version_name = self.get_latest_version_name(model_name)
 
         logger.info(
-            "Deploying %s/%s as service '%s' on pool '%s' (min=%d, max=%d)",
+            "Deploying %s/%s as service '%s' on pool '%s' (max=%d)",
             model_name,
             version_name,
             service_name,
             compute_pool,
-            min_instances,
             max_instances,
         )
 
@@ -127,8 +125,7 @@ class ModelDeployer:
 
         kwargs = dict(
             service_name=service_name,
-            compute_pool=compute_pool,
-            min_instances=min_instances,
+            service_compute_pool=compute_pool,
             max_instances=max_instances,
         )
         if gpu_requests:

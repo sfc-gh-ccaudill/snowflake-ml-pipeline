@@ -118,14 +118,14 @@ class PipelineExecutionLogger:
         pipeline_status: Optional[str] = None,
         mark_end: bool = False,
     ) -> None:
-        steps_json = json.dumps(steps, default=str)
+        steps_json = json.dumps(steps, default=str).replace("'", "''")
         end_clause = ", PIPELINE_END_TIME = CURRENT_TIMESTAMP()" if mark_end else ""
         status_clause = (
             f", PIPELINE_STATUS = '{pipeline_status}'" if pipeline_status else ""
         )
         self.session.sql(
             f"UPDATE {self.table} "
-            f"SET TASK_STEPS = PARSE_JSON($json${steps_json}$json$), "
+            f"SET TASK_STEPS = PARSE_JSON('{steps_json}'), "
             f"    UPDATED_AT = CURRENT_TIMESTAMP() "
             f"    {end_clause} "
             f"    {status_clause} "
@@ -146,8 +146,8 @@ class PipelineExecutionLogger:
             "start_time": start_iso,
             "status": "running",
         }
-        step_json = json.dumps(step_init)
-        init_json = json.dumps({task_key: step_init})
+        step_json = json.dumps(step_init).replace("'", "''")
+        init_json = json.dumps({task_key: step_init}).replace("'", "''")
 
         self.session.sql(
             f"MERGE INTO {self.table} t "
@@ -155,12 +155,12 @@ class PipelineExecutionLogger:
             f"ON t.PIPELINE_RUN_ID = s.run_id "
             f"WHEN MATCHED THEN UPDATE SET "
             f"    TASK_STEPS = OBJECT_INSERT(COALESCE(t.TASK_STEPS, PARSE_JSON('{{}}')), "
-            f"        '{task_key}', PARSE_JSON($json${step_json}$json$), TRUE), "
+            f"        '{task_key}', PARSE_JSON('{step_json}'), TRUE), "
             f"    UPDATED_AT = s.ts "
             f"WHEN NOT MATCHED THEN INSERT "
             f"    (PIPELINE_RUN_ID, PIPELINE_START_TIME, PIPELINE_STATUS, TASK_STEPS, CREATED_AT, UPDATED_AT) "
             f"VALUES "
-            f"    (s.run_id, s.ts, 'RUNNING', PARSE_JSON($json${init_json}$json$), s.ts, s.ts)"
+            f"    (s.run_id, s.ts, 'RUNNING', PARSE_JSON('{init_json}'), s.ts, s.ts)"
         ).collect()
 
         logger.info("Logged task start: %s (run_id=%s)", task_key, run_id)

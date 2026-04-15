@@ -14,6 +14,11 @@ from snowflake.snowpark import Session
 logger = logging.getLogger(__name__)
 
 
+def _get_registry(session: Session, database: str, schema: str):
+    from snowflake.ml.registry import Registry
+    return Registry(session, database_name=database, schema_name=schema)
+
+
 class ModelMonitor:
     """
     Creates and manages Snowflake Model Monitors for drift detection.
@@ -85,12 +90,10 @@ class ModelMonitor:
             id_columns: List of entity ID columns (e.g. ["PATIENT_ID"]).
             warehouse: Warehouse for monitor refresh jobs.
         """
-        from snowflake.ml.monitoring import MonitorClient
         from snowflake.ml.monitoring.entities.model_monitor_config import (
             ModelMonitorConfig,
             ModelMonitorSourceConfig,
         )
-        from snowflake.ml.registry import Registry
 
         id_columns = id_columns or ["PATIENT_ID"]
 
@@ -98,35 +101,28 @@ class ModelMonitor:
             "Creating monitor '%s' for %s/%s", monitor_name, model_name, version_name
         )
 
-        registry = Registry(
-            self.session,
-            database_name=self.database,
-            schema_name=self.schema,
-        )
-        model = registry.get_model(model_name)
-        mv = model.version(version_name)
+        registry = _get_registry(self.session, self.database, self.schema)
+        mv = registry.get_model(model_name).version(version_name)
 
         source_config = ModelMonitorSourceConfig(
-            source=self.session.table(source_table),
-            prediction_score_columns=[prediction_col],
-            label_columns=[label_col] if label_col else [],
-            id_columns=id_columns,
+            source=source_table,
             timestamp_column=timestamp_col,
-            baseline=self.session.table(baseline_table),
+            id_columns=id_columns,
+            prediction_class_columns=[prediction_col],
+            actual_class_columns=[label_col] if label_col else None,
+            baseline=baseline_table,
         )
 
         monitor_config = ModelMonitorConfig(
-            model=mv,
+            model_version=mv,
             model_function_name="predict",
             background_compute_warehouse_name=(
                 warehouse or self.session.get_current_warehouse()
             ),
         )
 
-        client = MonitorClient(session=self.session)
-
         try:
-            client.add_monitor(
+            registry.add_monitor(
                 name=monitor_name,
                 source_config=source_config,
                 model_monitor_config=monitor_config,
@@ -146,42 +142,31 @@ class ModelMonitor:
             monitor_name: Name of the monitor to inspect.
 
         Returns:
-            Dict with keys: name, status, last_refresh, and dashboard_url.
+            Dict with keys: name, status, monitor.
         """
-        from snowflake.ml.monitoring import MonitorClient
-
-        client = MonitorClient(session=self.session)
-
+        registry = _get_registry(self.session, self.database, self.schema)
         try:
-            monitor = client.get_monitor(monitor_name)
-            return {
-                "name": monitor_name,
-                "status": "active",
-                "monitor": monitor,
-            }
+            monitor = registry.get_monitor(name=monitor_name)
+            return {"name": monitor_name, "status": "active", "monitor": monitor}
         except Exception as exc:
             logger.warning("Could not retrieve monitor '%s': %s", monitor_name, exc)
             return {"name": monitor_name, "status": "not_found", "error": str(exc)}
 
     def list_monitors(self) -> list:
         """Return a list of all monitor names visible to the current session."""
-        from snowflake.ml.monitoring import MonitorClient
-
-        client = MonitorClient(session=self.session)
+        registry = _get_registry(self.session, self.database, self.schema)
         try:
-            monitors = client.list_monitors()
-            return [m.name for m in monitors]
+            rows = registry.show_model_monitors()
+            return [r.as_dict().get("name", "") for r in rows]
         except Exception as exc:
             logger.warning("Could not list monitors: %s", exc)
             return []
 
     def drop_monitor(self, monitor_name: str) -> None:
         """Delete a monitor (used in teardown / re-create scenarios)."""
-        from snowflake.ml.monitoring import MonitorClient
-
-        client = MonitorClient(session=self.session)
+        registry = _get_registry(self.session, self.database, self.schema)
         try:
-            client.delete_monitor(monitor_name)
+            registry.delete_monitor(name=monitor_name)
             logger.info("Monitor '%s' deleted", monitor_name)
         except Exception as exc:
             logger.warning("Could not delete monitor '%s': %s", monitor_name, exc)

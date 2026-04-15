@@ -22,6 +22,96 @@ from snowflake.snowpark import Session
 logger = logging.getLogger(__name__)
 
 MONITOR_NAME = "PATIENT_RISK_MONITOR"
+INFERENCE_LOGS_VIEW = "INFERENCE_LOGS_VIEW"
+BASELINE_TABLE = "MONITOR_BASELINE"
+
+_CATEGORICAL_COMPUTED = {"BMI_CATEGORY"}
+
+
+def _create_inference_logs_view(session: Session, config, db: str, schema: str, model_name: str) -> str:
+    """
+    Create (or replace) a flat view over INFERENCE_TABLE that exposes all
+    request features and the predicted class as typed columns.
+
+    Returns the fully-qualified view name.
+    """
+    from source.utils import get_feature_config
+
+    feature_config = get_feature_config(config)
+    raw_numeric = feature_config["raw_numeric_features"]
+    categorical = feature_config["categorical_features"]
+    computed = feature_config["computed_features"]
+
+    def _numeric_col(col: str) -> str:
+        return f'RECORD_ATTRIBUTES:"snow.model_serving.request.data.{col}"::FLOAT AS {col}'
+
+    def _varchar_col(col: str) -> str:
+        return f'RECORD_ATTRIBUTES:"snow.model_serving.request.data.{col}"::VARCHAR AS {col}'
+
+    col_exprs = (
+        [_numeric_col(c) for c in raw_numeric]
+        + [_varchar_col(c) for c in categorical]
+        + [
+            _varchar_col(c) if c in _CATEGORICAL_COMPUTED else _numeric_col(c)
+            for c in computed
+        ]
+        + [
+            'RECORD_ATTRIBUTES:"snow.model_serving.response.data.output_feature_0"::VARCHAR AS RISK_LEVEL'
+        ]
+    )
+
+    view_fqn = f"{db}.{schema}.{INFERENCE_LOGS_VIEW}"
+    cols_sql = ",\n    ".join(col_exprs)
+
+    session.sql(f"""
+        CREATE OR REPLACE VIEW {view_fqn} AS
+        SELECT
+            MD5(TO_VARCHAR(TIMESTAMP) || RECORD_ATTRIBUTES::VARCHAR) AS RECORD_ID,
+            TIMESTAMP,
+            {cols_sql}
+        FROM TABLE(INFERENCE_TABLE('{model_name}'))
+        WHERE RECORD_ATTRIBUTES:"snow.model_serving.function.name" = 'predict'
+    """).collect()
+
+    logger.info("Created inference logs view: %s", view_fqn)
+    return view_fqn
+
+
+def _create_baseline_table(session: Session, config, db: str, schema: str) -> str:
+    """
+    Materialize a snapshot of TEST_FEATURES with only the feature columns
+    and types needed by the model monitor (no PATIENT_ID, all numerics as
+    FLOAT to match the inference logs view).
+
+    Returns the fully-qualified table name.
+    """
+    from source.utils import get_feature_config
+
+    feature_config = get_feature_config(config)
+    raw_numeric = feature_config["raw_numeric_features"]
+    categorical = feature_config["categorical_features"]
+    computed = feature_config["computed_features"]
+    categorical.append("RISK_LEVEL")
+
+    col_exprs = (
+        [f"{c}::FLOAT AS {c}" for c in raw_numeric]
+        + [f"{c}::VARCHAR AS {c}" for c in categorical]
+        + [
+            f"{c}::VARCHAR AS {c}" if c in _CATEGORICAL_COMPUTED else f"{c}::FLOAT AS {c}"
+            for c in computed
+        ]
+    )
+    cols_sql = ", ".join(col_exprs)
+    table_fqn = f"{db}.{schema}.{BASELINE_TABLE}"
+
+    session.sql(f"""
+        CREATE OR REPLACE TABLE {table_fqn} AS
+        SELECT {cols_sql}
+        FROM {db}.{schema}.TEST_FEATURES
+    """).collect()
+
+    logger.info("Created baseline table: %s", table_fqn)
+    return table_fqn
 
 
 def run(config, session: Session, version_name: str = None) -> dict:
@@ -47,8 +137,6 @@ def run(config, session: Session, version_name: str = None) -> dict:
     schema = config.snowflake.schema_name
     model_name = config.model.model_name
     warehouse = config.snowflake.warehouse
-    source_table = f"{db}.{schema}.STREAMING_PATIENT_DATA"
-    baseline_table = f"{db}.{schema}.TEST_FEATURES"
 
     logger.info("=== Step 4: Model Monitor Setup ===")
 
@@ -60,14 +148,17 @@ def run(config, session: Session, version_name: str = None) -> dict:
         )
         version_name = deployer.get_latest_version_name(model_name)
 
+    source_table = _create_inference_logs_view(session, config, db, schema, model_name)
+    baseline_table = _create_baseline_table(session, config, db, schema)
+
     logger.info(
         "Setting up monitor '%s' for %s/%s",
         MONITOR_NAME,
         model_name,
         version_name,
     )
-    logger.info("  Source (live):   %s", source_table)
-    logger.info("  Baseline:        %s", baseline_table)
+    logger.info("  Source (inference logs view): %s", source_table)
+    logger.info("  Baseline:                     %s", baseline_table)
 
     monitor = ModelMonitor(
         session=session,
@@ -82,9 +173,9 @@ def run(config, session: Session, version_name: str = None) -> dict:
         source_table=source_table,
         baseline_table=baseline_table,
         timestamp_col="TIMESTAMP",
-        prediction_col="PREDICTED_RISK_LEVEL",
-        label_col="RISK_LEVEL",
-        id_columns=["PATIENT_ID"],
+        prediction_col="RISK_LEVEL",
+        label_col=None,
+        id_columns=["RECORD_ID"],
         warehouse=warehouse,
     )
 

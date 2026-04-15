@@ -27,10 +27,10 @@ from snowflake.ml.model.task import Task
 from snowflake.ml.experiment import ExperimentTracking
 
 try:
-    from configs import get_config
+    from configs import get_config, get_config_from_dict
     from utils import get_session, get_feature_config
 except ModuleNotFoundError:
-    from source.configs import get_config
+    from source.configs import get_config, get_config_from_dict
     from source.utils import get_session, get_feature_config
 
 logger = logging.getLogger(__name__)
@@ -261,8 +261,12 @@ class PatientRiskTraining:
 
 
 def main():
-
-    config = get_config("config.yaml")
+    import json
+    _ml_cfg = os.environ.get("ML_PIPELINE_CONFIG")
+    if _ml_cfg:
+        config = get_config_from_dict(json.loads(_ml_cfg))
+    else:
+        config = get_config("config.yaml")
 
     DB = config.snowflake.database
     SCHEMA = config.snowflake.schema_name

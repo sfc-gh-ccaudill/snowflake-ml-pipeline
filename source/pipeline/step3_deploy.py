@@ -70,7 +70,7 @@ def run(config, session: Session, version_name: str = None) -> dict:
         version_name=version_name,
         service_name=SERVICE_NAME,
         compute_pool=compute_pool,
-        min_instances=1,
+
         max_instances=config.compute.max_nodes,
     )
 

@@ -121,6 +121,9 @@ def _upload_source_zip(session: Session, stage: str) -> None:
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for file in source_dir.rglob("*.py"):
                 zf.write(file, file.relative_to(repo_root))
+            config_yaml = source_dir / "config.yaml"
+            if config_yaml.exists():
+                zf.write(config_yaml, config_yaml.relative_to(repo_root))
 
         logger.info("Uploading source.zip to @%s", stage)
         session.file.put(

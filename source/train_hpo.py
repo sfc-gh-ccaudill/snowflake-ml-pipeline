@@ -20,11 +20,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 
 try:
-    from configs import get_config
+    from configs import get_config, get_config_from_dict
     from framework.hpo import RayTuneRunner
     from utils import get_feature_config, get_session
 except ModuleNotFoundError:
-    from source.configs import get_config
+    from source.configs import get_config, get_config_from_dict
     from source.framework.hpo import RayTuneRunner
     from source.utils import get_feature_config, get_session
 
@@ -120,7 +120,13 @@ def main():
     runner = RayTuneRunner.from_env()
     runner.init_cluster()
 
-    config  = get_config("config.yaml")
+    import json
+    import os
+    _ml_cfg = os.environ.get("ML_PIPELINE_CONFIG")
+    if _ml_cfg:
+        config = get_config_from_dict(json.loads(_ml_cfg))
+    else:
+        config = get_config("config.yaml")
     session = get_session()
     session.use_database(config.snowflake.database)
     session.use_schema(config.snowflake.schema_name)

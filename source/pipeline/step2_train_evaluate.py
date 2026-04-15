@@ -45,6 +45,7 @@ def run(config, session: Session, num_instances: int = 3) -> dict:
     from source.framework.evaluator import Evaluator
     from source.framework.train import RemoteTrainer
     from source.utils import get_feature_config
+    from source.configs import config_to_dict
 
     db = config.snowflake.database
     schema = config.snowflake.schema_name
@@ -67,6 +68,7 @@ def run(config, session: Session, num_instances: int = 3) -> dict:
     job = trainer.submit(
         entrypoint="train.py",
         num_instances=num_instances,
+        env_vars={"ML_PIPELINE_CONFIG": json.dumps(config_to_dict(config))},
     )
 
     logger.info("ML Job submitted: %s", job.id)
