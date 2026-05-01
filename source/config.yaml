@@ -8,25 +8,99 @@ compute:
   compute_pool: ML_DEMO_COMPUTE_POOL
   instance_family: CPU_X64_S
   min_nodes: 1
-  max_nodes: 3
+  max_nodes: 6
 
 model:
   model_name: PATIENT_RISK_MODEL
   target_platforms:
     - SNOWPARK_CONTAINER_SERVICES
     - WAREHOUSE
+  params:
+    n_estimators: 100
+    class_weight: balanced
+    random_state: 42
+    n_jobs: -1
 
 tables:
   raw_data: RAW_PATIENT_DATA
+  test_features: TEST_FEATURES
+  metrics_table: MODEL_METRICS
 
-pipeline:
-  tune_hpo: false
-  hpo_num_samples: 20
-  hpo_search_alg: random
-  hpo_scheduler: asha
-  hpo_num_instances: 2
+stages:
+  job_payloads: JOB_PAYLOADS
 
-feature_config:
+deploy:
+  service_name: PATIENT_RISK_SERVICE
+  min_instances: 1
+  max_instances: 1
+  auto_suspend_secs: 3600
+
+monitor:
+  monitor_name: PATIENT_RISK_MONITOR
+  inference_logs_view: INFERENCE_LOGS_VIEW
+  baseline_table: MONITOR_BASELINE
+  drift_alert_name: PATIENT_RISK_DRIFT_ALERT
+  drift_alert_enabled: true
+  drift_metric: POPULATION_STABILITY_INDEX
+  drift_threshold: 0.25
+  drift_alert_schedule: "USING CRON 0 6 * * * America/Los_Angeles"
+  retrain_root_task: PIPELINE_FEATURE_ENG_TASK
+
+feature_store:
+  entity_name: PATIENT
+  entity_join_keys:
+    - PATIENT_ID
+  feature_view_name: PATIENT_FEATURES
+  feature_view_version: v1
+  feature_view_refresh_freq: "1 minute"
+  training_dataset_name: PATIENT_TRAINING_DATASET
+
+train:
+  num_nodes: 2
+
+tune:
+  enabled: false
+  num_samples: 20
+  search_alg: random
+  scheduler: asha
+  num_instances: 2
+  metric: f1_macro
+  mode: max
+  search_space:
+    n_estimators:
+      type: randint
+      lower: 50
+      upper: 500
+    max_depth:
+      type: randint
+      lower: 3
+      upper: 20
+    learning_rate:
+      type: loguniform
+      lower: 0.0001
+      upper: 0.3
+    subsample:
+      type: uniform
+      lower: 0.5
+      upper: 1.0
+    colsample_bytree:
+      type: uniform
+      lower: 0.5
+      upper: 1.0
+    reg_alpha:
+      type: loguniform
+      lower: 0.00001
+      upper: 10.0
+    reg_lambda:
+      type: loguniform
+      lower: 0.00001
+      upper: 10.0
+
+evaluation:
+  accuracy_threshold: 0.80
+  f1_macro_threshold: 0.75
+
+features:
   raw_numeric_features:
     - AGE
     - BMI

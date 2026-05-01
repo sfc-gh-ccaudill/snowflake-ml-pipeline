@@ -1,16 +1,16 @@
 """
-Pipeline Step 2 — Distributed Remote Training & Evaluation.
+Pipeline Step 3 — Model Evaluation & Promotion Gate.
 
 Responsibilities:
-  - Submit training to SPCS via ML Jobs (num_instances controls distributed nodes)
-  - Wait for completion and stream logs
-  - Evaluate the newly registered model version against TEST_FEATURES
+  - Retrieve the latest registered model version produced by Step 2 training
+  - Evaluate against TEST_FEATURES
+  - Log evaluation metrics to the MODEL_METRICS table
+  - Log evaluation metrics to the model version in the Snowflake ML Registry
   - Check promotion criteria thresholds
-  - Log all metrics to MODEL_METRICS table
-  - Persist the promoted version name for Step 3
+  - Return should_promote to gate the deploy task via the DAG WHEN clause
 
 Run standalone:
-    python -m source.pipeline.step2_train_evaluate
+    python -m source.pipeline.step2c_evaluate
 """
 
 import json
@@ -20,73 +20,39 @@ import sys
 
 from snowflake.snowpark import Session
 
+from source.framework.evaluator import Evaluator
+from source.pipeline.pipeline_utils import PipelineState
+from source.utils import get_feature_config, get_model_version
+
 logger = logging.getLogger(__name__)
 
-PROMOTION_THRESHOLDS = {
-    "accuracy": 0.80,
-    "f1_macro": 0.75,
-}
 
-
-def run(config, session: Session, num_instances: int = 3) -> dict:
+def run(config, session: Session) -> dict:
     """
-    Submit a distributed training job, evaluate the result, and check promotion.
+    Evaluate the latest model version and check promotion criteria.
 
     Args:
         config: PipelineConfig loaded from config.yaml.
         session: Active Snowpark session.
-        num_instances: Number of SPCS nodes for distributed training.
-                       1 = single-node remote, 3 = distributed (default for demo).
 
     Returns:
         dict with keys: status, model_name, version_name, metrics,
                         should_promote, promotion_checks.
     """
-    from source.framework.evaluator import Evaluator
-    from source.framework.train import RemoteTrainer
-    from source.utils import get_feature_config
-    from source.configs import config_to_dict
-
     db = config.snowflake.database
     schema = config.snowflake.schema_name
     model_name = config.model.model_name
-    test_table = f"{db}.{schema}.TEST_FEATURES"
-    metrics_table = f"{db}.{schema}.MODEL_METRICS"
-    compute_pool = config.compute.compute_pool
-    stage = f"{db}.{schema}.JOB_PAYLOADS"
+    test_table = f"{db}.{schema}.{config.tables.test_features}"
+    metrics_table = f"{db}.{schema}.{config.tables.metrics_table}"
+    promotion_thresholds = {
+        "accuracy": config.evaluation.accuracy_threshold,
+        "f1_macro": config.evaluation.f1_macro_threshold,
+    }
 
-    logger.info("=== Step 2: Distributed Remote Training & Evaluation ===")
-    logger.info("Distributed training: %d nodes on compute pool '%s'", num_instances, compute_pool)
+    logger.info("=== Step 3: Model Evaluation & Promotion Gate ===")
 
-    trainer = RemoteTrainer(
-        session=session,
-        compute_pool=compute_pool,
-        stage=stage,
-        source_dir="source",
-    )
-
-    job = trainer.submit(
-        entrypoint="train.py",
-        num_instances=num_instances,
-        env_vars={"ML_PIPELINE_CONFIG": json.dumps(config_to_dict(config))},
-    )
-
-    logger.info("ML Job submitted: %s", job.id)
-
-    trainer.wait_and_log(job)
-
-    logger.info("Training complete — retrieving latest model version")
-
-    from snowflake.ml.registry import Registry
-
-    registry = Registry(session, database_name=db, schema_name=schema)
-    model = registry.get_model(model_name)
-    versions = model.versions()
-    if not versions:
-        raise RuntimeError(f"No versions found for model '{model_name}' after training")
-
-    latest_version = versions[-1]
-    version_name = latest_version.version_name
+    mv = get_model_version(session, db, schema, model_name)
+    version_name = mv.version_name
     logger.info("Evaluating version: %s/%s", model_name, version_name)
 
     feature_config = get_feature_config(config)
@@ -115,9 +81,23 @@ def run(config, session: Session, num_instances: int = 3) -> dict:
         model_version=version_name,
     )
 
+    logger.info("Logging evaluation metrics to model version in registry")
+    scalar_metrics = {k: v for k, v in metrics.items() if isinstance(v, (int, float))}
+    for metric_name, metric_value in scalar_metrics.items():
+        try:
+            mv.log_metric(metric_name, metric_value)
+        except Exception as e:
+            logger.warning("Could not log metric '%s' to registry: %s", metric_name, e)
+    logger.info(
+        "Logged %d metrics to model version %s/%s in registry",
+        len(scalar_metrics),
+        model_name,
+        version_name,
+    )
+
     promotion_result = evaluator.check_promotion_criteria(
         metrics=metrics,
-        thresholds=PROMOTION_THRESHOLDS,
+        thresholds=promotion_thresholds,
     )
 
     report = evaluator.generate_report(metrics, promotion_result)
@@ -129,16 +109,17 @@ def run(config, session: Session, num_instances: int = 3) -> dict:
         failed = [k for k, v in promotion_result["checks"].items() if not v["passed"]]
         logger.warning("Model NOT approved — failed checks: %s", failed)
 
-    logger.info("=== Step 2 complete ===")
+    PipelineState(session, db, schema).set(
+        "evaluation", "should_promote", str(promotion_result["should_promote"]).lower()
+    )
+
+    logger.info("=== Step 3 complete ===")
 
     return {
         "status": "success",
-        "model_name": model_name,
-        "version_name": version_name,
-        "metrics": {k: v for k, v in metrics.items() if isinstance(v, (int, float, str))},
         "should_promote": promotion_result["should_promote"],
-        "promotion_checks": promotion_result["checks"],
-        "num_instances_used": num_instances,
+        "promotion_checks": promotion_result.get("checks", {}),
+        "metrics": metrics,
     }
 
 
@@ -159,9 +140,7 @@ def main():
     session.use_schema(config.snowflake.schema_name)
     session.use_warehouse(config.snowflake.warehouse)
 
-    num_instances = int(os.getenv("NUM_TRAINING_INSTANCES", "3"))
-
-    result = run(config, session, num_instances=num_instances)
+    result = run(config, session)
     logger.info("Result: %s", json.dumps(result, indent=2, default=str))
 
 

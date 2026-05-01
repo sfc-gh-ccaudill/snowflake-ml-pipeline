@@ -5,6 +5,7 @@ Common utilities for Snowflake ML framework.
 import os
 from typing import Any, Dict, Optional
 
+from snowflake.ml.registry import Registry
 from snowflake.snowpark import Session
 from snowflake.snowpark.context import get_active_session
 
@@ -73,7 +74,7 @@ def get_feature_config(config: Dict) -> Dict[str, Any]:
         Dict containing feature lists and metadata.
     """
 
-    fc = config.feature_config
+    fc = config.features
 
     return {
         "raw_numeric_features": fc.raw_numeric_features,
@@ -87,3 +88,14 @@ def get_feature_config(config: Dict) -> Dict[str, Any]:
         "id_columns": ["PATIENT_ID", "ENCOUNTER_ID"],
         "timestamp_column": "TIMESTAMP",
     }
+
+
+def get_model_version(session: Session, db: str, schema: str, model_name: str, version: Optional[str] = None):
+    """Get Model Version from Registry"""
+    registry = Registry(session, database_name=db, schema_name=schema)
+    model = registry.get_model(model_name)
+
+    if version is not None:
+        return model.version(version)
+
+    return model.last()

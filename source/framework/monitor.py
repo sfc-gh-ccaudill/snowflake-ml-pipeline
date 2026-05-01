@@ -7,7 +7,7 @@ baseline table as the reference distribution.
 """
 
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from snowflake.snowpark import Session
 
@@ -25,7 +25,9 @@ class ModelMonitor:
 
     Sets up column-level feature drift and prediction-class drift monitoring
     against a registered model version.  Uses the TEST_FEATURES table as the
-    baseline (reference) distribution.
+    baseline (reference) distribution.  Optionally enables segmented
+    monitoring so drift metrics can be broken down by categorical
+    dimensions (e.g. ADMISSION_TYPE, INSURANCE_TYPE).
 
     Args:
         session: Active Snowpark session.
@@ -43,6 +45,7 @@ class ModelMonitor:
         ...     timestamp_col="TIMESTAMP",
         ...     prediction_col="PREDICTED_RISK_LEVEL",
         ...     label_col="RISK_LEVEL",
+        ...     segment_columns=["ADMISSION_TYPE", "INSURANCE_TYPE"],
         ... )
     """
 
@@ -68,6 +71,7 @@ class ModelMonitor:
         label_col: Optional[str] = "RISK_LEVEL",
         id_columns: Optional[list] = None,
         warehouse: Optional[str] = None,
+        segment_columns: Optional[List[str]] = None,
     ) -> None:
         """
         Create a Model Monitor for drift and accuracy tracking.
@@ -89,11 +93,14 @@ class ModelMonitor:
                        tracking); None disables label-based metrics.
             id_columns: List of entity ID columns (e.g. ["PATIENT_ID"]).
             warehouse: Warehouse for monitor refresh jobs.
+            segment_columns: Optional list of categorical columns to enable
+                grouped (segmented) monitoring.  When provided, drift and
+                accuracy metrics are computed per-segment in addition to
+                the overall aggregate, allowing drill-down by dimensions
+                such as admission type or insurance type.
         """
         from snowflake.ml.monitoring.entities.model_monitor_config import (
-            ModelMonitorConfig,
-            ModelMonitorSourceConfig,
-        )
+            ModelMonitorConfig, ModelMonitorSourceConfig)
 
         id_columns = id_columns or ["PATIENT_ID"]
 
@@ -111,6 +118,7 @@ class ModelMonitor:
             prediction_class_columns=[prediction_col],
             actual_class_columns=[label_col] if label_col else None,
             baseline=baseline_table,
+            segment_columns=segment_columns,
         )
 
         monitor_config = ModelMonitorConfig(
@@ -170,3 +178,83 @@ class ModelMonitor:
             logger.info("Monitor '%s' deleted", monitor_name)
         except Exception as exc:
             logger.warning("Could not delete monitor '%s': %s", monitor_name, exc)
+
+    def setup_drift_alert(
+        self,
+        alert_name: str,
+        monitor_name: str,
+        prediction_col: str,
+        drift_metric: str = "POPULATION_STABILITY_INDEX",
+        drift_threshold: float = 0.25,
+        schedule: str = "USING CRON 0 6 * * * America/Los_Angeles",
+        warehouse: Optional[str] = None,
+        retrain_root_task: str = "PIPELINE_FEATURE_ENG_TASK",
+    ) -> None:
+        """
+        Create a Snowflake Alert that checks the model monitor for drift and
+        re-triggers the training pipeline task DAG when drift exceeds the
+        configured threshold.
+
+        The alert queries MODEL_MONITOR_DRIFT_METRIC for the prediction column
+        over the last 24 hours. If the max drift score exceeds the threshold,
+        the alert action executes the root task of the pipeline DAG.
+
+        Args:
+            alert_name: Name for the alert object.
+            monitor_name: Monitor to query drift metrics from.
+            prediction_col: Column to check drift on (e.g. RISK_LEVEL).
+            drift_metric: Drift metric name (PSI, JSD, etc.).
+            drift_threshold: Threshold above which retraining is triggered.
+            schedule: Alert evaluation schedule (cron or interval).
+            warehouse: Warehouse for alert evaluation.
+            retrain_root_task: Root task name to EXECUTE when drift detected.
+        """
+        wh = warehouse or self.session.get_current_warehouse()
+        fq_alert = f"{self.database}.{self.schema}.{alert_name}"
+        fq_task = f"{self.database}.{self.schema}.{retrain_root_task}"
+
+        condition_sql = f"""
+            SELECT MAX(metric_value) AS MAX_DRIFT
+            FROM TABLE(MODEL_MONITOR_DRIFT_METRIC(
+                '{monitor_name}',
+                '{drift_metric}',
+                '{prediction_col}',
+                '1 DAY',
+                DATEADD('DAY', -1, CURRENT_TIMESTAMP())::TIMESTAMP_NTZ,
+                CURRENT_TIMESTAMP()::TIMESTAMP_NTZ
+            ))
+            WHERE metric_value > {drift_threshold}
+        """.strip()
+
+        action_sql = f"EXECUTE TASK {fq_task}"
+
+        create_sql = f"""
+            CREATE OR REPLACE ALERT {fq_alert}
+                WAREHOUSE = {wh}
+                SCHEDULE = '{schedule}'
+                COMMENT = 'Re-triggers training pipeline when {drift_metric} drift on {prediction_col} exceeds {drift_threshold}'
+            IF(EXISTS(
+                {condition_sql}
+            ))
+            THEN
+                {action_sql}
+        """
+
+        try:
+            self.session.sql(create_sql).collect()
+            logger.info("Drift alert '%s' created", fq_alert)
+
+            self.session.sql(f"ALTER ALERT {fq_alert} RESUME").collect()
+            logger.info("Drift alert '%s' resumed", fq_alert)
+        except Exception as exc:
+            logger.error("Failed to create drift alert '%s': %s", fq_alert, exc)
+            raise
+
+    def drop_drift_alert(self, alert_name: str) -> None:
+        """Drop a drift alert (used in teardown / re-create scenarios)."""
+        fq_alert = f"{self.database}.{self.schema}.{alert_name}"
+        try:
+            self.session.sql(f"DROP ALERT IF EXISTS {fq_alert}").collect()
+            logger.info("Drift alert '%s' dropped", fq_alert)
+        except Exception as exc:
+            logger.warning("Could not drop drift alert '%s': %s", fq_alert, exc)

@@ -14,11 +14,15 @@ Run standalone:
 """
 
 import logging
-import sys
 import os
+import sys
+from datetime import datetime, timezone
 
 import snowflake.snowpark.functions as F
 from snowflake.snowpark import Session
+
+from source.framework.feature_store import FeatureStoreManager
+from source.pipeline.pipeline_utils import PipelineState
 
 logger = logging.getLogger(__name__)
 
@@ -74,14 +78,20 @@ def run(config, session: Session) -> dict:
     Returns:
         dict with keys: status, training_rows, test_rows.
     """
-    from source.framework.feature_store import FeatureStoreManager
-
     db = config.snowflake.database
     schema = config.snowflake.schema_name
     warehouse = config.snowflake.warehouse
-    raw_table = f"{db}.{schema}.RAW_PATIENT_DATA"
-    training_table = f"{db}.{schema}.TRAINING_FEATURES"
-    test_table = f"{db}.{schema}.TEST_FEATURES"
+    raw_table = config.full_raw_table
+    test_table = f"{db}.{schema}.{config.tables.test_features}"
+
+    fs_cfg = config.feature_store
+    entity_name = fs_cfg.entity_name
+    entity_join_keys = fs_cfg.entity_join_keys
+    feature_view_name = fs_cfg.feature_view_name
+    feature_view_version = fs_cfg.feature_view_version
+    feature_view_refresh_freq = fs_cfg.feature_view_refresh_freq
+    training_dataset_name = fs_cfg.training_dataset_name
+    training_dataset_version = datetime.now(timezone.utc).strftime("v_%Y%m%d_%H%M%S")
 
     logger.info("=== Step 1: Feature Engineering & Feature Store ===")
 
@@ -95,57 +105,71 @@ def run(config, session: Session) -> dict:
     fs = fs_manager.initialize_feature_store()
 
     entity = fs_manager.create_entity(
-        entity_name="PATIENT",
-        join_keys=["PATIENT_ID"],
-        description="Hospital patient identified by PATIENT_ID",
+        entity_name=entity_name,
+        join_keys=entity_join_keys,
+        description=f"Hospital patient identified by {entity_join_keys[0]}",
     )
 
     feature_df = _build_feature_dataframe(session, raw_table)
 
     feature_view = fs_manager.create_feature_view(
-        feature_view_name="PATIENT_FEATURES",
+        feature_view_name=feature_view_name,
         entities=[entity],
         features_df=feature_df,
-        version="v1",
+        version=feature_view_version,
         timestamp_column="TIMESTAMP",
-        refresh_freq="1 minute",
+        refresh_freq=feature_view_refresh_freq,
         description=(
             "Raw vitals + 4 engineered features: "
             "SHOCK_INDEX, PULSE_PRESSURE, BMI_CATEGORY, VITAL_SIGNS_SEVERITY"
         ),
     )
 
-    logger.info("Feature view registered: PATIENT_FEATURES v1")
+    logger.info("Feature view registered: %s %s", feature_view_name, feature_view_version)
 
-    # Spine carries only the join key + timestamp; the feature view (built from
-    # the full raw table) supplies every other column including the target.
-    spine_df = session.table(raw_table).select("PATIENT_ID", "TIMESTAMP")
+    state = PipelineState(session, db, schema)
+    logger.info("Dataset version for this run: %s", training_dataset_version)
 
-    training_df = fs.retrieve_feature_values(
-        spine_df=spine_df.sample(frac=0.8),
+    state.set("feature_engineering", "training_dataset_name", training_dataset_name)
+    state.set("feature_engineering", "training_dataset_version", training_dataset_version)
+    logger.info("Dataset info written to pipeline state")
+
+    spine_df = (
+        session.table(raw_table)
+        .select("PATIENT_ID", "TIMESTAMP")
+        .with_column("_SPLIT", F.uniform(F.lit(0), F.lit(1), F.random()))
+    )
+    train_spine = spine_df.filter(F.col("_SPLIT") < 0.8).drop("_SPLIT")
+    test_spine = spine_df.filter(F.col("_SPLIT") >= 0.8).drop("_SPLIT")
+
+    training_dataset = fs.generate_dataset(
+        spine_df=train_spine,
         features=[feature_view],
         spine_timestamp_col="TIMESTAMP",
+        name=training_dataset_name,
+        version=training_dataset_version,
+        desc=f"Point-in-time training snapshot for PATIENT_RISK model — {training_dataset_version}",
     )
+    logger.info("Training dataset %s/%s created", training_dataset_name, training_dataset_version)
 
     test_df = fs.retrieve_feature_values(
-        spine_df=spine_df.sample(frac=0.2),
+        spine_df=test_spine,
         features=[feature_view],
         spine_timestamp_col="TIMESTAMP",
     )
-
-    training_df.write.mode("overwrite").save_as_table(training_table)
     test_df.write.mode("overwrite").save_as_table(test_table)
 
-    training_rows = session.table(training_table).count()
+    training_rows = training_dataset.read.to_snowpark_dataframe().count()
     test_rows = session.table(test_table).count()
 
-    logger.info("TRAINING_FEATURES: %d rows -> %s", training_rows, training_table)
-    logger.info("TEST_FEATURES:     %d rows -> %s", test_rows, test_table)
+    logger.info("%s: %d rows (versioned Dataset)", training_dataset_name, training_rows)
+    logger.info("%s: %d rows -> %s", config.tables.test_features, test_rows, test_table)
     logger.info("=== Step 1 complete ===")
 
     return {
         "status": "success",
-        "training_table": training_table,
+        "training_dataset_name": training_dataset_name,
+        "training_dataset_version": training_dataset_version,
         "training_rows": training_rows,
         "test_table": test_table,
         "test_rows": test_rows,

@@ -6,12 +6,22 @@ model version as a REST inference endpoint on SPCS, and provides a
 predict() helper to validate the endpoint post-deployment.
 """
 
+import json
 import logging
+import os
 import time
-from typing import Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
+import requests
 from snowflake.snowpark import Session
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +62,7 @@ class ModelDeployer:
         self.registry_database = registry_database
         self.registry_schema = registry_schema
         self._registry = None
+        self._endpoint_url = None
 
     @property
     def registry(self):
@@ -67,14 +78,9 @@ class ModelDeployer:
 
     def get_latest_version_name(self, model_name: str) -> str:
         """Return the most recently created version name for a model."""
-        model = self.registry.get_model(model_name)
-        versions = model.versions()
-        if not versions:
-            raise ValueError(f"No versions found for model '{model_name}'")
-        latest = versions[-1]
-        version_name = latest.version_name
-        logger.info("Latest version of %s: %s", model_name, version_name)
-        return version_name
+        mv = self.registry.get_model(model_name).last()
+        logger.info("Latest version of %s: %s", model_name, mv.version_name)
+        return mv.version_name
 
     def deploy(
         self,
@@ -82,8 +88,10 @@ class ModelDeployer:
         service_name: str,
         compute_pool: str,
         version_name: Optional[str] = None,
+        min_instances: int = 1,
         max_instances: int = 3,
         gpu_requests: Optional[str] = None,
+        auto_suspend_secs: int = None,
         timeout_secs: int = _SERVICE_READY_TIMEOUT_SECS,
     ) -> str:
         """
@@ -100,6 +108,7 @@ class ModelDeployer:
             min_instances: Minimum service replicas.
             max_instances: Maximum service replicas (enables auto-scaling).
             gpu_requests: GPU resource request string (e.g. "1"), or None.
+            auto_suspend_secs: Seconds before suspending endpoint service.
             timeout_secs: Seconds to wait for the service to reach RUNNING.
 
         Returns:
@@ -112,12 +121,8 @@ class ModelDeployer:
             version_name = self.get_latest_version_name(model_name)
 
         logger.info(
-            "Deploying %s/%s as service '%s' on pool '%s' (max=%d)",
-            model_name,
-            version_name,
-            service_name,
-            compute_pool,
-            max_instances,
+            "Deploying %s/%s as service '%s' on pool '%s' (min=%d max=%d)",
+            model_name, version_name, service_name, compute_pool, min_instances, max_instances,
         )
 
         model = self.registry.get_model(model_name)
@@ -126,7 +131,11 @@ class ModelDeployer:
         kwargs = dict(
             service_name=service_name,
             service_compute_pool=compute_pool,
+            image_build_compute_pool=compute_pool,
+            min_instances=min_instances,
             max_instances=max_instances,
+            autocapture=True,
+            ingress_enabled=True
         )
         if gpu_requests:
             kwargs["gpu_requests"] = gpu_requests
@@ -136,6 +145,9 @@ class ModelDeployer:
         logger.info("Service '%s' created — waiting for RUNNING state", service_name)
         self._wait_for_service(service_name, timeout_secs)
 
+        if auto_suspend_secs:
+            logger.info(f"Setting auto_suspend_secs on COMPUTE_POOL {compute_pool}")
+            self.configure_compute_pool_auto_suspend(compute_pool, auto_suspend_secs)
         return service_name
 
     def _wait_for_service(self, service_name: str, timeout_secs: int) -> None:
@@ -180,6 +192,7 @@ class ModelDeployer:
     def predict(
         self,
         model_name: str,
+        service_name: str,
         version_name: str,
         features_df: pd.DataFrame,
         function_name: str = "predict",
@@ -213,21 +226,151 @@ class ModelDeployer:
             len(features_df),
         )
 
-        result = mv.run(features_df, function_name=function_name)
+        result = mv.run(features_df, service_name=service_name, function_name=function_name)
         logger.info("Inference returned %d rows", len(result))
         return result
 
-    def get_service_status(self, service_name: str) -> str:
-        """Return the current status of a deployed service."""
+    def set_default_version(self, model_name: str, version_name: str) -> None:
+        """Set the default version on a registry model.
+
+        After deployment this ensures that any inference call that does not
+        explicitly specify a version (e.g. direct registry calls, Cortex
+        functions) routes to the newly deployed version.
+        """
+        logger.info("Setting default version for %s → %s", model_name, version_name)
+        self.session.sql(
+            f"ALTER MODEL {self.registry_database}.{self.registry_schema}.{model_name} "
+            f"SET DEFAULT_VERSION = '{version_name}'"
+        ).collect()
+        logger.info("Default version updated: %s/%s", model_name, version_name)
+
+    def configure_compute_pool_auto_suspend(self, compute_pool: str, auto_suspend_secs: int) -> None:
+        """Set the auto-suspend timeout on a compute pool."""
+        logger.info(
+            "Setting AUTO_SUSPEND_SECS = %d on compute pool '%s'",
+            auto_suspend_secs, compute_pool,
+        )
+        self.session.sql(
+            f"ALTER COMPUTE POOL {compute_pool} SET AUTO_SUSPEND_SECS = {auto_suspend_secs}"
+        ).collect()
+        self.session.sql(
+            f"ALTER COMPUTE POOL {compute_pool} SET AUTO_RESUME = TRUE"
+        ).collect()
+
+    def service_exists(self, service_name: str) -> bool:
+        """Return True if a service with the given name currently exists."""
+        rows = self.session.sql(f"SHOW SERVICES LIKE '{service_name}'").collect()
+        return any(
+            row.as_dict().get("name", "").upper() == service_name.upper()
+            for row in rows
+        )
+
+    def get_service_status(self, service_name: str) -> Optional[str]:
+        """Return the current status of a deployed service, or None if it does not exist."""
         rows = self.session.sql(f"SHOW SERVICES LIKE '{service_name}'").collect()
         for row in rows:
             row_dict = row.as_dict()
             if row_dict.get("name", "").upper() == service_name.upper():
-                return row_dict.get("status", "NOT_FOUND").upper()
-        return "NOT_FOUND"
+                return row_dict.get("status", "UNKNOWN").upper()
+        return None
+
+    def resume_service(
+        self,
+        service_name: str,
+        wait: bool = False,
+        timeout_secs: int = _SERVICE_READY_TIMEOUT_SECS,
+    ) -> str:
+        logger.info("Resuming service '%s'", service_name)
+        self.session.sql(f"ALTER SERVICE {service_name} RESUME").collect()
+
+        if wait:
+            self._wait_for_service(service_name, timeout_secs)
+
+        status = self.get_service_status(service_name)
+        logger.info("Service '%s' status after resume: %s", service_name, status)
+        return status
+
+    def get_endpoint_url(
+        self,
+        service_name: str,
+        endpoint_path: str = "/predict",
+        endpoint_timeout_secs: int = 120,
+    ) -> str:
+    
+        # == If we've already identified the URL, return it ==
+        if self._endpoint_url:
+            return self._endpoint_url
+
+        self._wait_for_service(service_name, _SERVICE_READY_TIMEOUT_SECS)
+
+        start = time.time()
+        while True:
+            rows = self.session.sql(
+                f"SHOW ENDPOINTS IN SERVICE {service_name}"
+            ).collect()
+
+            for row in rows:
+                row_dict = row.as_dict()
+                ingress = row_dict.get("ingress_url")
+                if ingress:
+                    url = f"https://{ingress}{endpoint_path}"
+                    logger.info("Endpoint URL for '%s': %s", service_name, url)
+                    self._endpoint_url = url
+                    return url
+
+            elapsed = time.time() - start
+            if elapsed > endpoint_timeout_secs:
+                raise TimeoutError(
+                    f"No ingress endpoint found for '{service_name}' within "
+                    f"{endpoint_timeout_secs}s"
+                )
+
+            logger.info(
+                "No endpoint yet for '%s' — retrying in 5s (%.0fs elapsed)",
+                service_name, elapsed,
+            )
+            time.sleep(5)
+
+    def predict_rest(
+        self,
+        service_name: str,
+        features_df: pd.DataFrame,
+        endpoint_path: str = "/predict",
+        token:str = None
+    ) -> Dict[str, Any]:
+        
+        url = self.get_endpoint_url(service_name, endpoint_path=endpoint_path)
+        
+        # == Get Auth Token ==
+        auth_token = os.environ.get("SNOWFLAKE_TOKEN")
+        if auth_token is None:
+            logger.warning("== No Auth Token Found. ==")
+            auth_token = token
+
+
+        payload = json.loads(features_df.to_json(orient="records"))
+
+        # logger.info(
+        #     "REST inference: url=%s, rows=%d", url, len(features_df),
+        # )
+
+        response = requests.post(
+            url,
+            json={"dataframe_records": payload},
+            headers={
+                "Authorization": f'Snowflake Token="{token}"',
+                "Content-Type": "application/json",
+            },
+        )
+
+        response.raise_for_status()
+        result = response.json()
+        # logger.info("REST inference returned: %s", result)
+        return result
 
     def drop_service(self, service_name: str) -> None:
         """Drop a running service (used in teardown / re-deploy scenarios)."""
         logger.info("Dropping service '%s'", service_name)
         self.session.sql(f"DROP SERVICE IF EXISTS {service_name}").collect()
         logger.info("Service '%s' dropped", service_name)
+

@@ -2,23 +2,53 @@
 Configuration dataclasses for Healthcare ML Pipeline.
 """
 
+import dataclasses
 import os
 from dataclasses import dataclass, field
-from typing import List
+from typing import Any, Dict, List
 
 import yaml
 
 
+class BaseConfig:
+    """Mixin that provides generic from_dict and to_dict classmethods for all config dataclasses."""
+
+    @classmethod
+    def from_dict(cls, d: dict):
+        valid = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in valid})
+
+    def to_dict(self) -> dict:
+        return {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}
+
+
 @dataclass
-class SnowflakeConfig:
+class SnowflakeConfig(BaseConfig):
     connection_name: str
     database: str
     schema_name: str
     warehouse: str
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "SnowflakeConfig":
+        return cls(
+            connection_name=d.get("connection_name", ""),
+            database=d.get("database"),
+            schema_name=d.get("schema"),
+            warehouse=d.get("warehouse"),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "connection_name": self.connection_name,
+            "database":        self.database,
+            "schema":          self.schema_name,
+            "warehouse":       self.warehouse,
+        }
+
 
 @dataclass
-class ComputeConfig:
+class ComputeConfig(BaseConfig):
     compute_pool: str
     instance_family: str
     min_nodes: int
@@ -26,18 +56,86 @@ class ComputeConfig:
 
 
 @dataclass
-class ModelConfig:
+class ModelParams(BaseConfig):
+    n_estimators: int = 100
+    class_weight: str = "balanced"
+    random_state: int = 42
+    n_jobs: int = -1
+
+
+@dataclass
+class ModelConfig(BaseConfig):
     model_name: str
     target_platforms: List[str]
+    params: ModelParams
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ModelConfig":
+        return cls(
+            model_name=d.get("model_name"),
+            target_platforms=d.get("target_platforms"),
+            params=ModelParams.from_dict(d.get("params", {})),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "model_name":       self.model_name,
+            "target_platforms": self.target_platforms,
+            "params":           self.params.to_dict(),
+        }
 
 
 @dataclass
-class TableConfig:
+class TableConfig(BaseConfig):
     raw_data: str
+    test_features: str = "TEST_FEATURES"
+    metrics_table: str = "MODEL_METRICS"
 
 
 @dataclass
-class FeatureConfig:
+class FeatureStoreConfig(BaseConfig):
+    entity_name: str
+    entity_join_keys: List[str]
+    feature_view_name: str
+    feature_view_version: str
+    feature_view_refresh_freq: str
+    training_dataset_name: str
+
+
+@dataclass
+class DeployConfig(BaseConfig):
+    service_name: str
+    min_instances: int = 1
+    max_instances: int = 3
+    auto_suspend_secs: int = 3600
+
+
+@dataclass
+class MonitorConfig(BaseConfig):
+    monitor_name: str = "PATIENT_RISK_MONITOR"
+    inference_logs_view: str = "INFERENCE_LOGS_VIEW"
+    baseline_table: str = "MONITOR_BASELINE"
+    drift_alert_name: str = "PATIENT_RISK_DRIFT_ALERT"
+    drift_alert_enabled: bool = True
+    drift_metric: str = "POPULATION_STABILITY_INDEX"
+    drift_threshold: float = 0.25
+    drift_alert_schedule: str = "USING CRON 0 6 * * * America/Los_Angeles"
+    retrain_root_task: str = "PIPELINE_FEATURE_ENG_TASK"
+
+
+@dataclass
+class StagesConfig(BaseConfig):
+    job_payloads: str = "JOB_PAYLOADS"
+
+
+@dataclass
+class EvaluationConfig(BaseConfig):
+    accuracy_threshold: float = 0.80
+    f1_macro_threshold: float = 0.75
+
+
+@dataclass
+class FeatureConfig(BaseConfig):
     raw_numeric_features: List[str]
     categorical_features: List[str]
     computed_features: List[str]
@@ -46,22 +144,36 @@ class FeatureConfig:
 
 
 @dataclass
-class PipelineRunConfig:
-    tune_hpo: bool
-    hpo_num_samples: int
-    hpo_search_alg: str
-    hpo_scheduler: str
-    hpo_num_instances: int
+class TrainConfig(BaseConfig):
+    num_nodes: int = 2
 
 
 @dataclass
-class PipelineConfig:
+class TuneConfig(BaseConfig):
+    enabled: bool = False
+    num_samples: int = 20
+    search_alg: str = "random"
+    scheduler: str = "asha"
+    num_instances: int = 2
+    metric: str = "f1_macro"
+    mode: str = "max"
+    search_space: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class PipelineConfig(BaseConfig):
     snowflake: SnowflakeConfig
     compute: ComputeConfig
     model: ModelConfig
     tables: TableConfig
-    feature_config: FeatureConfig
-    pipeline: PipelineRunConfig
+    features: FeatureConfig
+    feature_store: FeatureStoreConfig = None
+    deploy: DeployConfig = None
+    stages: StagesConfig = None
+    evaluation: EvaluationConfig = None
+    train: TrainConfig = None
+    tune: TuneConfig = None
+    monitor: MonitorConfig = None
 
     @property
     def full_schema(self) -> str:
@@ -71,144 +183,57 @@ class PipelineConfig:
     def full_raw_table(self) -> str:
         return f"{self.full_schema}.{self.tables.raw_data}"
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "PipelineConfig":
+        return cls(
+            snowflake=SnowflakeConfig.from_dict(d.get("snowflake", {})),
+            compute=ComputeConfig.from_dict(d.get("compute", {})),
+            model=ModelConfig.from_dict(d.get("model", {})),
+            tables=TableConfig.from_dict(d.get("tables", {})),
+            features=FeatureConfig.from_dict(d.get("features", {})),
+            feature_store=FeatureStoreConfig.from_dict(d.get("feature_store", {})),
+            deploy=DeployConfig.from_dict(d.get("deploy", {})),
+            stages=StagesConfig.from_dict(d.get("stages", {})),
+            evaluation=EvaluationConfig.from_dict(d.get("evaluation", {})),
+            train=TrainConfig.from_dict(d.get("train", {})),
+            tune=TuneConfig.from_dict(d.get("tune", {})),
+            monitor=MonitorConfig.from_dict(d.get("monitor", {})),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "snowflake":     self.snowflake.to_dict(),
+            "compute":       self.compute.to_dict(),
+            "model":         self.model.to_dict(),
+            "tables":        self.tables.to_dict(),
+            "features":      self.features.to_dict(),
+            "feature_store": self.feature_store.to_dict(),
+            "deploy":        self.deploy.to_dict(),
+            "stages":        self.stages.to_dict(),
+            "evaluation":    self.evaluation.to_dict(),
+            "train":         self.train.to_dict(),
+            "tune":          self.tune.to_dict(),
+            "monitor":       self.monitor.to_dict(),
+        }
+
 
 def load_config(config_path: str = "config.yaml") -> dict:
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def _pipeline_run_config_from_dict(d: dict) -> PipelineRunConfig:
-    return PipelineRunConfig(
-        tune_hpo=bool(d.get("tune_hpo", False)),
-        hpo_num_samples=int(d.get("hpo_num_samples", 20)),
-        hpo_search_alg=d.get("hpo_search_alg", "random"),
-        hpo_scheduler=d.get("hpo_scheduler", "asha"),
-        hpo_num_instances=int(d.get("hpo_num_instances", 2)),
-    )
-
-
 def get_config_from_dict(config_dict: dict) -> PipelineConfig:
-    snowflake_config = SnowflakeConfig(
-        connection_name=config_dict.get("snowflake", {}).get("connection_name", ""),
-        database=config_dict.get("snowflake", {}).get("database"),
-        schema_name=config_dict.get("snowflake", {}).get("schema"),
-        warehouse=config_dict.get("snowflake", {}).get("warehouse"),
-    )
-    compute_config = ComputeConfig(
-        compute_pool=config_dict.get("compute", {}).get("compute_pool"),
-        instance_family=config_dict.get("compute", {}).get("instance_family"),
-        min_nodes=config_dict.get("compute", {}).get("min_nodes"),
-        max_nodes=config_dict.get("compute", {}).get("max_nodes"),
-    )
-    model_cfg = config_dict.get("model", {})
-    model_config = ModelConfig(
-        model_name=model_cfg.get("model_name"),
-        target_platforms=model_cfg.get("target_platforms"),
-    )
-    table_config = TableConfig(raw_data=config_dict.get("tables", {}).get("raw_data"))
-    feat_cfg = config_dict.get("feature_config", {})
-    feature_config = FeatureConfig(
-        raw_numeric_features=feat_cfg.get("raw_numeric_features"),
-        categorical_features=feat_cfg.get("categorical_features"),
-        computed_features=feat_cfg.get("computed_features"),
-        target_column=feat_cfg.get("target_column"),
-        class_labels=feat_cfg.get("class_labels"),
-    )
-    pipeline_config = _pipeline_run_config_from_dict(config_dict.get("pipeline", {}))
-    return PipelineConfig(
-        snowflake=snowflake_config,
-        compute=compute_config,
-        model=model_config,
-        tables=table_config,
-        feature_config=feature_config,
-        pipeline=pipeline_config,
-    )
-
-
-def config_to_dict(config: "PipelineConfig") -> dict:
-    """Serialize a PipelineConfig to the canonical dict format accepted by get_config_from_dict."""
-    return {
-        "snowflake": {
-            "connection_name": config.snowflake.connection_name,
-            "database": config.snowflake.database,
-            "schema": config.snowflake.schema_name,
-            "warehouse": config.snowflake.warehouse,
-        },
-        "compute": {
-            "compute_pool": config.compute.compute_pool,
-            "instance_family": config.compute.instance_family,
-            "min_nodes": config.compute.min_nodes,
-            "max_nodes": config.compute.max_nodes,
-        },
-        "model": {
-            "model_name": config.model.model_name,
-            "target_platforms": config.model.target_platforms,
-        },
-        "tables": {
-            "raw_data": config.tables.raw_data,
-        },
-        "feature_config": {
-            "raw_numeric_features": config.feature_config.raw_numeric_features,
-            "categorical_features": config.feature_config.categorical_features,
-            "computed_features": config.feature_config.computed_features,
-            "target_column": config.feature_config.target_column,
-            "class_labels": config.feature_config.class_labels,
-        },
-        "pipeline": {
-            "tune_hpo": config.pipeline.tune_hpo,
-            "hpo_num_samples": config.pipeline.hpo_num_samples,
-            "hpo_search_alg": config.pipeline.hpo_search_alg,
-            "hpo_scheduler": config.pipeline.hpo_scheduler,
-            "hpo_num_instances": config.pipeline.hpo_num_instances,
-        },
-    }
+    return PipelineConfig.from_dict(config_dict)
 
 
 def get_config(config_path: str = "config.yaml") -> PipelineConfig:
     config_dict = load_config(config_path)
+    snowflake = config_dict.setdefault("snowflake", {})
+    if not snowflake.get("connection_name"):
+        snowflake["connection_name"] = os.getenv("SNOWFLAKE_CONNECTION_NAME", "default")
+    return get_config_from_dict(config_dict)
 
-    snowflake_config = SnowflakeConfig(
-        connection_name=config_dict.get("snowflake", {}).get(
-            "connection_name", os.getenv("SNOWFLAKE_CONNECTION_NAME", "default")
-        ),
-        database=config_dict.get("snowflake", {}).get("database"),
-        schema_name=config_dict.get("snowflake", {}).get("schema"),
-        warehouse=config_dict.get("snowflake", {}).get("warehouse"),
-    )
 
-    compute_config = ComputeConfig(
-        compute_pool=config_dict.get("compute", {}).get("compute_pool"),
-        instance_family=config_dict.get("compute", {}).get("instance_family"),
-        min_nodes=config_dict.get("compute", {}).get("min_nodes"),
-        max_nodes=config_dict.get("compute", {}).get("max_nodes"),
-    )
-
-    model_cfg = config_dict.get("model", {})
-    model_config = ModelConfig(
-        model_name=model_cfg.get("model_name"),
-        target_platforms=model_cfg.get("target_platforms"),
-    )
-
-    tables_cfg = config_dict.get("tables", {})
-    table_config = TableConfig(
-        raw_data=tables_cfg.get("raw_data"),
-    )
-
-    feat_cfg = config_dict.get("feature_config", {})
-    feature_config = FeatureConfig(
-        raw_numeric_features=feat_cfg.get("raw_numeric_features"),
-        categorical_features=feat_cfg.get("categorical_features"),
-        computed_features=feat_cfg.get("computed_features"),
-        target_column=feat_cfg.get("target_column"),
-        class_labels=feat_cfg.get("class_labels"),
-    )
-
-    pipeline_config = _pipeline_run_config_from_dict(config_dict.get("pipeline", {}))
-    return PipelineConfig(
-        snowflake=snowflake_config,
-        compute=compute_config,
-        model=model_config,
-        tables=table_config,
-        feature_config=feature_config,
-        pipeline=pipeline_config,
-    )
+def config_to_dict(config: PipelineConfig) -> dict:
+    """Serialize a PipelineConfig to the canonical dict format accepted by get_config_from_dict."""
+    return config.to_dict()

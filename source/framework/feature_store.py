@@ -13,8 +13,8 @@ pre-computed, reusable features that encode domain knowledge.
 import logging
 from typing import Any, List
 
-from snowflake.snowpark import Session
 import snowflake.snowpark.functions as F
+from snowflake.snowpark import Session
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class FeatureStoreManager:
         self.fs = None
 
     def initialize_feature_store(self) -> Any:
-        from snowflake.ml.feature_store import FeatureStore, CreationMode
+        from snowflake.ml.feature_store import CreationMode, FeatureStore
 
         logger.info(f"Initializing Feature Store in {self.database}.{self.schema_name}")
 
@@ -66,11 +66,14 @@ class FeatureStoreManager:
             registered_entity = self.fs.register_entity(entity)
             logger.info(f"Entity {entity_name} registered")
             return registered_entity
+        except Exception:
+            pass
+        try:
+            existing = self.fs.get_entity(entity_name)
+            logger.info(f"Entity {entity_name} already exists, returning existing")
+            return existing
         except Exception as e:
-            if "already exists" in str(e).lower():
-                logger.info(f"Entity {entity_name} already exists, retrieving")
-                return self.fs.get_entity(entity_name)
-            raise
+            raise RuntimeError(f"Failed to register or retrieve entity '{entity_name}'") from e
 
     def create_feature_view(
         self,
@@ -82,12 +85,26 @@ class FeatureStoreManager:
         refresh_freq: str = "1 minute",
         description: str = None,
     ) -> Any:
-        """Create feature view with computed/engineered features."""
+        """Register a feature view, reusing it if it already exists.
+
+        On a recurring pipeline run the feature view will already be present.
+        In that case it is returned as-is rather than recreated — the pipeline
+        is idempotent with respect to Feature Store objects.
+
+        To update a feature view after changing feature engineering logic,
+        bump the version argument (e.g. 'v2') so a new view is created
+        alongside the existing one rather than replacing it in place.
+        """
         from snowflake.ml.feature_store import FeatureView
 
-        logger.info(
-            f"Creating feature view: {feature_view_name} with computed features"
-        )
+        logger.info(f"Creating feature view: {feature_view_name}/{version}")
+
+        try:
+            existing = self.fs.get_feature_view(feature_view_name, version)
+            logger.info(f"Feature view {feature_view_name}/{version} already exists — using existing")
+            return existing
+        except Exception as e:
+            logger.info(f"Feature view {feature_view_name}/{version} not found ({type(e).__name__}) — registering")
 
         fv = FeatureView(
             name=feature_view_name,
@@ -98,23 +115,13 @@ class FeatureStoreManager:
             desc=description,
         )
 
-        try:
-            registered_fv = self.fs.register_feature_view(
-                feature_view=fv,
-                version=version,
-                block=True,
-            )
-            logger.info(
-                f"Feature view {feature_view_name} registered with computed features"
-            )
-            return registered_fv
-        except Exception as e:
-            if "already exists" in str(e).lower():
-                logger.info(
-                    f"Feature view {feature_view_name} already exists, retrieving"
-                )
-                return self.fs.get_feature_view(feature_view_name, version)
-            raise
+        registered_fv = self.fs.register_feature_view(
+            feature_view=fv,
+            version=version,
+            block=True,
+        )
+        logger.info(f"Feature view {feature_view_name}/{version} registered")
+        return registered_fv
 
     def enable_online_serving(self, feature_view: Any) -> dict:
         logger.info("Enabling online serving for feature view")

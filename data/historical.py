@@ -320,7 +320,7 @@ class HistoricalDataGenerator:
         if create_test_split:
             test_result = self.create_test_split(
                 source_table=table_name,
-                test_table="TEST_PATIENT_DATA",
+                test_table="TEST_FEATURES",
             )
             results["test_table"] = test_result
 

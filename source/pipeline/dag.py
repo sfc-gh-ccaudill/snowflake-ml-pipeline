@@ -1,17 +1,19 @@
 """
 Task DAG Creation Script — Orchestrates the full ML pipeline via Snowflake Tasks.
 
-This script creates four Python Stored Procedures (one per pipeline step) and
+This script creates Python Stored Procedures (one per pipeline step) and
 wires them into a chained Snowflake Task DAG:
 
-    ROOT_TASK (Step 1: Feature Engineering)
-        └── TRAIN_TASK (Step 2: Distributed Training + Evaluation)
-              └── DEPLOY_TASK (Step 3: REST Endpoint Deployment)
-                    └── MONITOR_TASK (Step 4: Model Monitor Setup)
+    PIPELINE_FEATURE_ENG_TASK  (Step 1: Feature Engineering)
+        └── HPO_TASK       (Step 2b: Hyperparameter Tuning — optional)
+              └── TRAIN_TASK     (Step 2:  Distributed Training)
+                    └── EVALUATE_TASK  (Step 2c: Evaluation & Promotion Gate)
+                          └── DEPLOY_TASK    (Step 3:  REST Endpoint — runs only when should_promote=true)
+                                └── MONITOR_TASK   (Step 4:  Model Monitor Setup)
 
 The root task is scheduled weekly (Sunday 02:00 AM PT) but can be triggered
 manually at any time with:
-    EXECUTE TASK <DB>.<SCHEMA>.PIPELINE_ROOT_TASK;
+    EXECUTE TASK <DB>.<SCHEMA>.PIPELINE_FEATURE_ENG_TASK;
 
 Teardown:
     python -m source.pipeline.dag --teardown
@@ -21,6 +23,8 @@ Usage:
     python -m source.pipeline.dag --run     # create DAG + trigger immediately
     python -m source.pipeline.dag --teardown
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -32,438 +36,357 @@ import zipfile
 from pathlib import Path
 
 from snowflake.snowpark import Session
+from snowflake.snowpark.types import VariantType
+
+from source.configs import config_to_dict
+from source.pipeline.step_handler import make_handler
 
 logger = logging.getLogger(__name__)
 
-PACKAGES = "('snowflake-ml-python', 'scikit-learn', 'pandas', 'numpy')"
-RUNTIME = "3.11"
+PACKAGES = ["snowflake-ml-python", "scikit-learn", "pandas", "numpy"]
 
-_STEP_PROCEDURES = [
+_STEPS: list[dict] = [
     {
         "proc_name": "RUN_FEATURE_ENGINEERING",
-        "task_name": "PIPELINE_ROOT_TASK",
+        "task_name": "PIPELINE_FEATURE_ENG_TASK",
         "task_key":  "feature_engineering",
-        "imports": "source.pipeline.step1_feature_engineering",
+        "imports":   "source.pipeline.step1_feature_engineering",
         "step_func": "run",
         "description": "Step 1 — Feature Engineering & Feature Store",
-        "after": None,
-        "schedule": "USING CRON 0 2 * * 0 America/Los_Angeles",
-        "when": None,
-        "is_final": False,
+        "after":     None,
+        "schedule":  "USING CRON 0 2 * * 0 America/Los_Angeles",
+        "when":      None,
+        "is_final":  False,
     },
     {
         "proc_name": "RUN_HPO",
         "task_name": "PIPELINE_HPO_TASK",
         "task_key":  "hpo",
-        "imports": "source.pipeline.step2b_hpo",
+        "imports":   "source.pipeline.step2b_hpo",
         "step_func": "run",
-        "description": "Step 2b — Hyperparameter Tuning (skips internally if tune_hpo=false)",
-        "after": "PIPELINE_ROOT_TASK",
-        "schedule": None,
-        "when": None,
-        "is_final": False,
+        "description": "Step 2b — Hyperparameter Tuning (skips internally if tune.enabled=false)",
+        "after":     "PIPELINE_FEATURE_ENG_TASK",
+        "schedule":  None,
+        "when":      None,
+        "is_final":  False,
     },
     {
-        "proc_name": "RUN_TRAIN_EVALUATE",
+        "proc_name": "RUN_TRAIN",
         "task_name": "PIPELINE_TRAIN_TASK",
         "task_key":  "training",
-        "imports": "source.pipeline.step2_train_evaluate",
+        "imports":   "source.pipeline.step2_train",
         "step_func": "run",
-        "description": "Step 2 — Distributed Training & Evaluation",
-        "after": "PIPELINE_HPO_TASK",
-        "schedule": None,
-        "when": None,
-        "is_final": False,
+        "description": "Step 2 — Distributed Training",
+        "after":     "PIPELINE_HPO_TASK",
+        "schedule":  None,
+        "when":      None,
+        "is_final":  False,
+    },
+    {
+        "proc_name": "RUN_EVALUATE",
+        "task_name": "PIPELINE_EVALUATE_TASK",
+        "task_key":  "evaluation",
+        "imports":   "source.pipeline.step3_evaluate",
+        "step_func": "run",
+        "description": "Step 3 — Model Evaluation & Promotion Gate",
+        "after":     "PIPELINE_TRAIN_TASK",
+        "schedule":  None,
+        "when":      None,
+        "is_final":  False,
     },
     {
         "proc_name": "RUN_DEPLOY",
         "task_name": "PIPELINE_DEPLOY_TASK",
         "task_key":  "deployment",
-        "imports": "source.pipeline.step3_deploy",
+        "imports":   "source.pipeline.step4_deploy",
         "step_func": "run",
-        "description": "Step 3 — REST Endpoint Deployment",
-        "after": "PIPELINE_TRAIN_TASK",
-        "schedule": None,
-        "when": None,
-        "is_final": False,
+        "description": "Step 4 — REST Endpoint Deployment",
+        "after":     "PIPELINE_EVALUATE_TASK",
+        "schedule":  None,
+        "when":      None,
+        "is_final":  False,
     },
     {
         "proc_name": "RUN_MONITOR_SETUP",
         "task_name": "PIPELINE_MONITOR_TASK",
         "task_key":  "monitoring",
-        "imports": "source.pipeline.step4_monitor",
+        "imports":   "source.pipeline.step5_monitor",
         "step_func": "run",
-        "description": "Step 4 — Model Monitor Setup",
-        "after": "PIPELINE_DEPLOY_TASK",
-        "schedule": None,
-        "when": None,
-        "is_final": True,
+        "description": "Step 5 — Model Monitor Setup",
+        "after":     "PIPELINE_DEPLOY_TASK",
+        "schedule":  None,
+        "when":      None,
+        "is_final":  True,
     },
 ]
 
 
-def _upload_config_yaml(session: Session, stage: str) -> None:
-    """Upload config.yaml to the stage so SPCS jobs can read it."""
-    repo_root = Path(__file__).resolve().parent.parent.parent
-    config_path = str(repo_root / "source" / "config.yaml")
-    logger.info("Uploading config.yaml to @%s", stage)
-    session.file.put(config_path, f"@{stage}", auto_compress=False, overwrite=True)
-    logger.info("config.yaml uploaded successfully")
+class PipelineDAG:
+    """Manages the lifecycle of the ML pipeline Snowflake Task DAG.
 
-
-def _upload_source_zip(session: Session, stage: str) -> None:
-    """Zip the source/ package and upload it to the stage."""
-    repo_root = Path(__file__).resolve().parent.parent.parent
-    source_dir = repo_root / "source"
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        zip_path = os.path.join(tmpdir, "source.zip")
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for file in source_dir.rglob("*.py"):
-                zf.write(file, file.relative_to(repo_root))
-            config_yaml = source_dir / "config.yaml"
-            if config_yaml.exists():
-                zf.write(config_yaml, config_yaml.relative_to(repo_root))
-
-        logger.info("Uploading source.zip to @%s", stage)
-        session.file.put(
-            zip_path,
-            f"@{stage}",
-            auto_compress=False,
-            overwrite=True,
-        )
-        logger.info("source.zip uploaded successfully")
-
-
-def _serialize_config(config) -> str:
-    d = {
-        "snowflake": {
-            "connection_name": config.snowflake.connection_name,
-            "database": config.snowflake.database,
-            "schema": config.snowflake.schema_name,
-            "warehouse": config.snowflake.warehouse,
-        },
-        "compute": {
-            "compute_pool": config.compute.compute_pool,
-            "instance_family": config.compute.instance_family,
-            "min_nodes": config.compute.min_nodes,
-            "max_nodes": config.compute.max_nodes,
-        },
-        "model": {
-            "model_name": config.model.model_name,
-            "target_platforms": config.model.target_platforms,
-        },
-            "pipeline": {
-                "tune_hpo": config.pipeline.tune_hpo,
-                "hpo_num_samples": config.pipeline.hpo_num_samples,
-                "hpo_search_alg": config.pipeline.hpo_search_alg,
-                "hpo_scheduler": config.pipeline.hpo_scheduler,
-                "hpo_num_instances": config.pipeline.hpo_num_instances,
-            },
-        "tables": {"raw_data": config.tables.raw_data},
-        "feature_config": {
-            "raw_numeric_features": config.feature_config.raw_numeric_features,
-            "categorical_features": config.feature_config.categorical_features,
-            "computed_features": config.feature_config.computed_features,
-            "target_column": config.feature_config.target_column,
-            "class_labels": config.feature_config.class_labels,
-        },
-    }
-    return json.dumps(d)
-
-
-def _build_handler(
-    step_import: str,
-    step_func: str,
-    config_json: str,
-    predecessor_task: str = None,
-    task_key: str = "",
-    task_name: str = "",
-    is_final: bool = False,
-) -> str:
-    pred_block = ""
-    if predecessor_task:
-        pred_block = (
-            "    try:\n"
-            f"        raw = session.sql(\"SELECT SYSTEM$GET_PREDECESSOR_RETURN_VALUE('{predecessor_task}')\").collect()[0][0]\n"
-            "        if raw:\n"
-            "            pred = json.loads(raw) if isinstance(raw, str) else raw\n"
-            "            if isinstance(pred, dict) and '_pipeline_config' in pred:\n"
-            "                config_dict = pred['_pipeline_config']\n"
-            "    except Exception:\n"
-            "        pass\n"
-        )
-    return (
-        "import sys\n"
-        "def handler(session):\n"
-        "    import json\n"
-        "    import logging\n"
-        "    logging.basicConfig(level=logging.INFO,\n"
-        "                        format='%(asctime)s %(levelname)s %(name)s - %(message)s')\n"
-        f"    from {step_import} import {step_func}\n"
-        "    from source.configs import get_config_from_dict\n"
-        "    from source.pipeline.execution_log import PipelineExecutionLogger\n"
-        f"    config_dict = json.loads('{config_json}')\n"
-        + pred_block +
-        "    try:\n"
-        "        raw = session.sql(\"SELECT SYSTEM$TASK_RUNTIME_INFO('CURRENT_TASK_CONFIG')\").collect()[0][0]\n"
-        "        if raw:\n"
-        "            overrides = json.loads(raw)\n"
-        "            def _merge(base, patch):\n"
-        "                for k, v in patch.items():\n"
-        "                    if isinstance(v, dict) and isinstance(base.get(k), dict):\n"
-        "                        _merge(base[k], v)\n"
-        "                    else:\n"
-        "                        base[k] = v\n"
-        "            _merge(config_dict, overrides)\n"
-        "    except Exception:\n"
-        "        pass\n"
-        "    config = get_config_from_dict(config_dict)\n"
-        f"    _db = config_dict.get('snowflake', {{}}).get('database', '')\n"
-        f"    _sc = config_dict.get('snowflake', {{}}).get('schema', '')\n"
-        f"    _log = PipelineExecutionLogger(session, _db, _sc)\n"
-        f"    _run_id, _t0 = _log.log_task_start('{task_key}', '{task_name}')\n"
-        "    try:\n"
-        f"        result = {step_func}(config, session)\n"
-        "        if not isinstance(result, dict):\n"
-        "            result = {'result': result}\n"
-        "        _status = result.get('status', 'success')\n"
-        "        if _status not in ('skipped', 'failed'):\n"
-        "            _status = 'success'\n"
-        f"        _log.log_task_end(_run_id, '{task_key}', _t0, _status, details=result, is_final={is_final})\n"
-        "    except Exception as _exc:\n"
-        "        try:\n"
-        f"            _log.log_task_end(_run_id, '{task_key}', _t0, 'failed', details={{'error': str(_exc)}}, is_final={is_final})\n"
-        "        except Exception:\n"
-        "            pass\n"
-        "        raise\n"
-        "    result['_pipeline_config'] = config_dict\n"
-        "    return result\n"
-    )
-
-
-def _create_stored_procedure(
-    session: Session,
-    db: str,
-    schema: str,
-    warehouse: str,
-    proc_name: str,
-    step_import: str,
-    step_func: str,
-    stage: str,
-    config_json: str,
-    predecessor_task: str = None,
-    task_key: str = "",
-    task_name: str = "",
-    is_final: bool = False,
-) -> None:
-    """Create or replace a stored procedure that wraps one pipeline step."""
-    full_proc = f"{db}.{schema}.{proc_name}"
-    logger.info("Creating stored procedure: %s", full_proc)
-
-    handler_body = _build_handler(
-        step_import, step_func, config_json, predecessor_task,
-        task_key=task_key, task_name=task_name, is_final=is_final,
-    )
-
-    session.sql(f"""
-        CREATE OR REPLACE PROCEDURE {full_proc}()
-        RETURNS VARIANT
-        LANGUAGE PYTHON
-        RUNTIME_VERSION = '{RUNTIME}'
-        PACKAGES = {PACKAGES}
-        IMPORTS = ('@{stage}/source.zip')
-        HANDLER = 'handler'
-        EXECUTE AS CALLER
-        AS $$
-{handler_body}
-$$
-    """).collect()
-
-    logger.info("Stored procedure %s created", full_proc)
-
-
-def _create_task(
-    session: Session,
-    db: str,
-    schema: str,
-    warehouse: str,
-    task_name: str,
-    proc_name: str,
-    after: str,
-    schedule: str,
-    when_col: str = None,
-) -> None:
-    """Create or replace a task that calls a stored procedure."""
-    full_task = f"{db}.{schema}.{task_name}"
-    full_proc = f"{db}.{schema}.{proc_name}"
-
-    if after:
-        full_after = f"{db}.{schema}.{after}"
-        after_clause = f"AFTER {full_after}"
-        schedule_clause = ""
-        overlap_clause = ""
-    else:
-        after_clause = ""
-        schedule_clause = f"SCHEDULE = '{schedule}'"
-        overlap_clause = "ALLOW_OVERLAPPING_EXECUTION = FALSE"
-
-    when_clause = f"WHEN {when_col}" if when_col is not None else ""
-
-    logger.info("Creating task: %s", full_task)
-
-    session.sql(f"""
-        CREATE OR REPLACE TASK {full_task}
-            WAREHOUSE = {warehouse}
-            {schedule_clause}
-            {after_clause}
-            {overlap_clause}
-            {when_clause}
-        AS
-            CALL {full_proc}()
-    """).collect()
-
-    logger.info("Task %s created", full_task)
-
-
-def _ensure_task_privileges(session: Session) -> None:
-    """Grant EXECUTE TASK on the account to the current role."""
-    role = session.sql("SELECT CURRENT_ROLE()").collect()[0][0]
-    try:
-        session.sql(f"GRANT EXECUTE TASK ON ACCOUNT TO ROLE {role}").collect()
-        logger.info("Granted EXECUTE TASK ON ACCOUNT to role %s", role)
-    except Exception as e:
-        logger.warning(
-            "Could not auto-grant EXECUTE TASK (need ACCOUNTADMIN). "
-            "Run manually: GRANT EXECUTE TASK ON ACCOUNT TO ROLE %s;  Error: %s",
-            role, e,
-        )
-
-
-def create_dag(session: Session, config) -> None:
+    Attributes:
+        session:   Active Snowpark session.
+        config:    PipelineConfig loaded from config.yaml.
+        db:        Target Snowflake database.
+        schema:    Target Snowflake schema.
+        warehouse: Warehouse used by all tasks.
+        stage:     Fully-qualified stage name for uploads and SP handler files.
     """
-    Create all stored procedures and tasks, then resume the root task.
 
-    After calling this function the pipeline will run on the configured
-    weekly schedule, or can be triggered immediately with EXECUTE TASK.
+    def __init__(self, session: Session, config) -> None:
+        self.session = session
+        self.config = config
+        self.db = config.snowflake.database
+        self.schema = config.snowflake.schema_name
+        self.warehouse = config.snowflake.warehouse
+        self.stage = f"{self.db}.{self.schema}.{config.stages.job_payloads}"
 
-    Args:
-        session: Active Snowpark session.
-        config: PipelineConfig loaded from config.yaml.
-    """
-    db = config.snowflake.database
-    schema = config.snowflake.schema_name
-    warehouse = config.snowflake.warehouse
-    stage = f"{db}.{schema}.JOB_PAYLOADS"
+    def build(self) -> None:
+        """Create all stored procedures and tasks, then resume the root task.
 
-    logger.info("=== Creating ML Pipeline Task DAG ===")
-    logger.info("  Database:  %s", db)
-    logger.info("  Schema:    %s", schema)
-    logger.info("  Warehouse: %s", warehouse)
+        After calling this the pipeline will run on the configured weekly
+        schedule, or can be triggered immediately via ``run()``.
+        """
+        logger.info("=== Creating ML Pipeline Task DAG ===")
+        logger.info("  Database:  %s", self.db)
+        logger.info("  Schema:    %s", self.schema)
+        logger.info("  Warehouse: %s", self.warehouse)
 
-    _upload_source_zip(session, stage)
-    _upload_config_yaml(session, stage)
+        source_zip_path, deploy_ts = self._upload_source_zip()
+        self._upload_config_yaml()
 
-    config_json = _serialize_config(config)
+        config_json = json.dumps(config_to_dict(self.config))
 
-    from source.pipeline.execution_log import PipelineExecutionLogger
-    PipelineExecutionLogger.ensure_table(session, db, schema)
+        for step in _STEPS:
+            self._register_step_procedure(step, source_zip_path, config_json, deploy_ts)
 
-    for step in _STEP_PROCEDURES:
-        _create_stored_procedure(
-            session=session,
-            db=db,
-            schema=schema,
-            warehouse=warehouse,
-            proc_name=step["proc_name"],
+
+        for step in _STEPS:
+            self._create_task(step)
+
+        self._ensure_task_privileges()
+
+        for step in _STEPS:
+            if step["after"] is not None:
+                full_task = f"{self.db}.{self.schema}.{step['task_name']}"
+                logger.info("Resuming child task: %s", full_task)
+                self.session.sql(f"ALTER TASK {full_task} RESUME").collect()
+
+        logger.info("Resuming root task to activate schedule")
+        self.session.sql(
+            f"ALTER TASK {self.db}.{self.schema}.PIPELINE_FEATURE_ENG_TASK RESUME"
+        ).collect()
+
+        self._prune_old_deploys()
+        logger.info("=== Task DAG created and scheduled ===")
+        self._print_dag_summary()
+
+    def run(self) -> None:
+        """Trigger the root task immediately (runs the full pipeline now)."""
+        logger.info("Triggering pipeline execution: EXECUTE TASK PIPELINE_FEATURE_ENG_TASK")
+        self.session.sql(
+            f"EXECUTE TASK {self.db}.{self.schema}.PIPELINE_FEATURE_ENG_TASK"
+        ).collect()
+        logger.info("Pipeline triggered — monitor progress in Snowsight > Tasks")
+
+    def teardown(self) -> None:
+        """Drop all pipeline tasks and stored procedures in reverse order."""
+        logger.info("=== Tearing down ML Pipeline Task DAG ===")
+        for step in reversed(_STEPS):
+            full_task = f"{self.db}.{self.schema}.{step['task_name']}"
+            full_proc = f"{self.db}.{self.schema}.{step['proc_name']}"
+            logger.info("Dropping task: %s", full_task)
+            self.session.sql(f"DROP TASK IF EXISTS {full_task}").collect()
+            logger.info("Dropping procedure: %s", full_proc)
+            self.session.sql(f"DROP PROCEDURE IF EXISTS {full_proc}()").collect()
+        logger.info("=== Teardown complete ===")
+
+    def _upload_source_zip(self) -> str:
+        """Zip the source/ package and upload it to a timestamped stage path.
+
+        Returns the fully-qualified stage path of the uploaded zip so callers
+        can embed the exact path in IMPORTS — bypassing Snowflake's per-path
+        stage-file cache that would otherwise serve a stale version.
+        """
+        import time
+
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        source_dir = repo_root / "source"
+        deploy_ts = int(time.time())
+        stage_subdir = f"deploys/{deploy_ts}"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_path = os.path.join(tmpdir, "source.zip")
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for file in source_dir.rglob("*.py"):
+                    zf.write(file, file.relative_to(repo_root))
+                config_yaml = source_dir / "config.yaml"
+                if config_yaml.exists():
+                    zf.write(config_yaml, config_yaml.relative_to(repo_root))
+
+            stage_path = f"@{self.stage}/{stage_subdir}"
+            logger.info("Uploading source.zip to %s", stage_path)
+            self.session.file.put(
+                zip_path,
+                stage_path,
+                auto_compress=False,
+                overwrite=True,
+            )
+            logger.info("source.zip uploaded to %s/source.zip", stage_path)
+
+        return f"@{self.stage}/{stage_subdir}/source.zip", deploy_ts
+
+    def _upload_config_yaml(self) -> None:
+        """Upload config.yaml to the stage so SPCS jobs can read it."""
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        config_path = str(repo_root / "source" / "config.yaml")
+        logger.info("Uploading config.yaml to @%s", self.stage)
+        self.session.file.put(config_path, f"@{self.stage}", auto_compress=False, overwrite=True)
+        logger.info("config.yaml uploaded successfully")
+
+    def _prune_old_deploys(self, keep: int = 3) -> None:
+        """Remove stale deploy archives and SP handler zips from the stage.
+
+        Keeps the ``keep`` most recent timestamped directories under both
+        ``deploys/`` (source.zip archives) and ``procs/<name>/`` (handler zips)
+        so the stage does not accumulate unbounded artifacts over time.
+        """
+        try:
+            rows = self.session.sql(f"LIST @{self.stage}/deploys/").collect()
+            paths = sorted(
+                {r["name"].split("/deploys/")[1].split("/")[0] for r in rows},
+                reverse=True,
+            )
+            for old_ts in paths[keep:]:
+                self.session.sql(f"REMOVE @{self.stage}/deploys/{old_ts}/").collect()
+                logger.info("Pruned old deploy archive: deploys/%s", old_ts)
+        except Exception as e:
+            logger.warning("Could not prune deploy archives: %s", e)
+
+        for step in _STEPS:
+            proc_dir = step["proc_name"].lower()
+            try:
+                rows = self.session.sql(f"LIST @{self.stage}/procs/{proc_dir}/").collect()
+                ts_dirs = sorted(
+                    {r["name"].split(f"/procs/{proc_dir}/")[1].split("/")[0] for r in rows},
+                    reverse=True,
+                )
+                for old_ts in ts_dirs[keep:]:
+                    self.session.sql(f"REMOVE @{self.stage}/procs/{proc_dir}/{old_ts}/").collect()
+                    logger.info("Pruned old handler zip: procs/%s/%s", proc_dir, old_ts)
+            except Exception as e:
+                logger.warning("Could not prune handler zips for %s: %s", proc_dir, e)
+
+    def _register_step_procedure(
+        self,
+        step: dict,
+        source_zip_path: str,
+        config_json: str,
+        deploy_ts: int,
+    ) -> None:
+        """Register a permanent stored procedure that wraps one pipeline step.
+
+        Uses a timestamped ``stage_location`` (``procs/<proc_name>/<deploy_ts>/``)
+        so each deployment lands at a new stage path, forcing Snowflake warehouse
+        workers to download the fresh handler rather than serving a cached copy.
+        """
+        proc_name = step["proc_name"]
+        full_proc = f"{self.db}.{self.schema}.{proc_name}"
+        logger.info("Registering stored procedure: %s", full_proc)
+
+        handler = make_handler(
             step_import=step["imports"],
             step_func=step["step_func"],
-            stage=stage,
             config_json=config_json,
-            predecessor_task=step.get("after"),
             task_key=step["task_key"],
             task_name=step["task_name"],
             is_final=step.get("is_final", False),
         )
 
-    for step in _STEP_PROCEDURES:
-        when_val = step.get("when")
-        _create_task(
-            session=session,
-            db=db,
-            schema=schema,
-            warehouse=warehouse,
-            task_name=step["task_name"],
-            proc_name=step["proc_name"],
-            after=step["after"],
-            schedule=step.get("schedule"),
-            when_col=when_val(config) if callable(when_val) else when_val,
+        self.session.sproc.register(
+            func=handler,
+            return_type=VariantType(),
+            name=full_proc,
+            is_permanent=True,
+            stage_location=f"@{self.stage}/procs/{proc_name.lower()}/{deploy_ts}/",
+            imports=[source_zip_path],
+            packages=PACKAGES,
+            replace=True,
+            execute_as="owner",
         )
 
-    _ensure_task_privileges(session)
+        logger.info("Stored procedure %s registered", full_proc)
 
-    for step in _STEP_PROCEDURES:
-        if step["after"] is not None:
-            full_task = f"{db}.{schema}.{step['task_name']}"
-            logger.info("Resuming child task: %s", full_task)
-            session.sql(f"ALTER TASK {full_task} RESUME").collect()
+    def _create_task(self, step: dict) -> None:
+        """Create or replace a Snowflake task that calls a stored procedure."""
+        task_name = step["task_name"]
+        proc_name = step["proc_name"]
+        full_task = f"{self.db}.{self.schema}.{task_name}"
+        full_proc = f"{self.db}.{self.schema}.{proc_name}"
 
-    logger.info("Resuming root task to activate schedule")
-    session.sql(
-        f"ALTER TASK {db}.{schema}.PIPELINE_ROOT_TASK RESUME"
-    ).collect()
+        clauses = [f"WAREHOUSE = {self.warehouse}"]
 
-    logger.info("=== Task DAG created and scheduled ===")
-    _print_dag_summary(session, db, schema)
+        if step["after"]:
+            clauses.append(f"AFTER {self.db}.{self.schema}.{step['after']}")
+        else:
+            clauses.append(f"SCHEDULE = '{step['schedule']}'")
+            clauses.append("ALLOW_OVERLAPPING_EXECUTION = FALSE")
 
+        when_val = step.get("when")
+        if when_val:
+            when_str = when_val(self.config) if callable(when_val) else when_val
+            clauses.append(f"WHEN {when_str}")
 
-def _print_dag_summary(session: Session, db: str, schema: str) -> None:
-    """Log a human-readable summary of the task DAG."""
-    rows = session.sql(f"SHOW TASKS IN SCHEMA {db}.{schema}").collect()
-    logger.info("\nTask DAG summary:")
-    logger.info("%-40s %-12s %-30s", "TASK", "STATE", "AFTER / SCHEDULE")
-    logger.info("-" * 85)
-    for row in rows:
-        d = row.as_dict()
-        name = d.get("name", "")
-        if not any(name.upper() == s["task_name"] for s in _STEP_PROCEDURES):
-            continue
-        state = d.get("state", "")
-        schedule = d.get("schedule", "") or d.get("predecessors", "")
-        logger.info("%-40s %-12s %-30s", name, state, schedule)
+        props = "\n    ".join(clauses)
+        logger.info("Creating task: %s", full_task)
+        self.session.sql(f"""
+            CREATE OR REPLACE TASK {full_task}
+                {props}
+            AS
+                CALL {full_proc}()
+        """).collect()
+        logger.info("Task %s created", full_task)
 
+    def _ensure_task_privileges(self) -> None:
+        """Grant EXECUTE TASK and Feature Store tag privileges to the current role."""
+        role = self.session.sql("SELECT CURRENT_ROLE()").collect()[0][0]
+        grants = [
+            (
+                f"GRANT EXECUTE TASK ON ACCOUNT TO ROLE {role}",
+                f"EXECUTE TASK ON ACCOUNT to role {role}",
+                f"Run manually: GRANT EXECUTE TASK ON ACCOUNT TO ROLE {role};",
+            ),
+            (
+                f"GRANT APPLY TAG ON ACCOUNT TO ROLE {role}",
+                f"APPLY TAG ON ACCOUNT to role {role}",
+                f"Run manually: GRANT APPLY TAG ON ACCOUNT TO ROLE {role};",
+            ),
+        ]
+        for sql, description, hint in grants:
+            try:
+                self.session.sql(sql).collect()
+                logger.info("Granted %s", description)
+            except Exception as e:
+                logger.warning(
+                    "Could not auto-grant %s (need ACCOUNTADMIN). %s  Error: %s",
+                    description, hint, e,
+                )
 
-def execute_dag(session: Session, config) -> None:
-    """Trigger the root task immediately (runs full pipeline now)."""
-    db = config.snowflake.database
-    schema = config.snowflake.schema_name
-    logger.info("Triggering pipeline execution: EXECUTE TASK PIPELINE_ROOT_TASK")
-    session.sql(
-        f"EXECUTE TASK {db}.{schema}.PIPELINE_ROOT_TASK"
-    ).collect()
-    logger.info("Pipeline triggered — monitor progress in Snowsight > Tasks")
-
-
-def teardown_dag(session: Session, config) -> None:
-    """
-    Drop all pipeline tasks and stored procedures.
-
-    Use this to cleanly remove the DAG before re-creating with updated code.
-    """
-    db = config.snowflake.database
-    schema = config.snowflake.schema_name
-
-    logger.info("=== Tearing down ML Pipeline Task DAG ===")
-
-    for step in reversed(_STEP_PROCEDURES):
-        full_task = f"{db}.{schema}.{step['task_name']}"
-        full_proc = f"{db}.{schema}.{step['proc_name']}"
-        logger.info("Dropping task: %s", full_task)
-        session.sql(f"DROP TASK IF EXISTS {full_task}").collect()
-        logger.info("Dropping procedure: %s", full_proc)
-        session.sql(f"DROP PROCEDURE IF EXISTS {full_proc}()").collect()
-
-    logger.info("=== Teardown complete ===")
+    def _print_dag_summary(self) -> None:
+        """Log a human-readable summary of the deployed task DAG."""
+        rows = self.session.sql(f"SHOW TASKS IN SCHEMA {self.db}.{self.schema}").collect()
+        task_names = {s["task_name"] for s in _STEPS}
+        logger.info("\nTask DAG summary:")
+        logger.info("%-40s %-12s %-30s", "TASK", "STATE", "AFTER / SCHEDULE")
+        logger.info("-" * 85)
+        for row in rows:
+            d = row.as_dict()
+            name = d.get("name", "")
+            if name.upper() not in task_names:
+                continue
+            state = d.get("state", "")
+            schedule = d.get("schedule", "") or d.get("predecessors", "")
+            logger.info("%-40s %-12s %-30s", name, state, schedule)
 
 
 def main():
@@ -473,8 +396,8 @@ def main():
     )
 
     parser = argparse.ArgumentParser(description="Manage ML pipeline Task DAG")
-    parser.add_argument("--build", action="store_true", help="Create DAG", default=True)
-    parser.add_argument("--run", action="store_true", help="Trigger DAG immediately")
+    parser.add_argument("--build", action="store_true", help="Create / update DAG")
+    parser.add_argument("--run", action="store_true", help="Trigger DAG immediately after build")
     parser.add_argument("--teardown", action="store_true", help="Drop all tasks and procedures")
     args = parser.parse_args()
 
@@ -489,13 +412,15 @@ def main():
     session.use_schema(config.snowflake.schema_name)
     session.use_warehouse(config.snowflake.warehouse)
 
+    dag = PipelineDAG(session, config)
+
     if args.teardown:
-        teardown_dag(session, config)
+        dag.teardown()
     else:
         if args.build:
-            create_dag(session, config)
+            dag.build()
         if args.run:
-            execute_dag(session, config)
+            dag.run()
 
 
 if __name__ == "__main__":

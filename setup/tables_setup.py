@@ -108,7 +108,7 @@ class TablesSetup:
         logger.info(f"Table {table_name} ready")
 
     def create_test_data_table(self) -> None:
-        table_name = f"{self.full_schema}.TEST_PATIENT_DATA"
+        table_name = f"{self.full_schema}.TEST_FEATURES"
         logger.info(f"Creating table: {table_name}")
 
         self._execute(
@@ -116,6 +116,44 @@ class TablesSetup:
             CREATE TABLE IF NOT EXISTS {table_name} (
                 {PATIENT_DATA_COLUMNS},
                 CREATED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+            )
+        """
+        )
+        logger.info(f"Table {table_name} ready")
+
+    def create_pipeline_executions_table(self) -> None:
+        table_name = f"{self.full_schema}.PIPELINE_EXECUTIONS"
+        logger.info(f"Creating table: {table_name}")
+
+        self._execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                PIPELINE_RUN_ID      VARCHAR         NOT NULL,
+                PIPELINE_START_TIME  TIMESTAMP_NTZ,
+                PIPELINE_END_TIME    TIMESTAMP_NTZ,
+                PIPELINE_STATUS      VARCHAR         DEFAULT 'RUNNING',
+                TASK_STEPS           VARIANT,
+                CREATED_AT           TIMESTAMP_NTZ   DEFAULT CURRENT_TIMESTAMP(),
+                UPDATED_AT           TIMESTAMP_NTZ   DEFAULT CURRENT_TIMESTAMP(),
+                CONSTRAINT PK_PIPELINE_EXECUTIONS PRIMARY KEY (PIPELINE_RUN_ID)
+            )
+        """
+        )
+        logger.info(f"Table {table_name} ready")
+
+    def create_pipeline_state_table(self) -> None:
+        table_name = f"{self.full_schema}.PIPELINE_STATE"
+        logger.info(f"Creating table: {table_name}")
+
+        self._execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                RUN_ID      VARCHAR        NOT NULL,
+                STEP        VARCHAR        NOT NULL,
+                KEY         VARCHAR        NOT NULL,
+                VALUE       VARCHAR,
+                UPDATED_AT  TIMESTAMP_NTZ  DEFAULT CURRENT_TIMESTAMP(),
+                CONSTRAINT PK_PIPELINE_STATE PRIMARY KEY (RUN_ID, STEP, KEY)
             )
         """
         )
@@ -173,7 +211,9 @@ class TablesSetup:
             f"{self.full_schema}.STREAMING_PATIENT_DATA",
             f"{self.full_schema}.MODEL_METRICS",
             f"{self.full_schema}.BASELINE_PATIENT_DATA",
-            f"{self.full_schema}.TEST_PATIENT_DATA",
+            f"{self.full_schema}.TEST_FEATURES",
+            f"{self.full_schema}.PIPELINE_EXECUTIONS",
+            f"{self.full_schema}.PIPELINE_STATE",
         ]
 
     def run(self, warehouse: str = None) -> dict:
@@ -184,6 +224,8 @@ class TablesSetup:
         self.create_metrics_table()
         self.create_baseline_table()
         self.create_test_data_table()
+        self.create_pipeline_executions_table()
+        self.create_pipeline_state_table()
 
         if warehouse:
             self.create_dynamic_streaming_table(warehouse)
@@ -204,6 +246,7 @@ def main():
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     from configs import get_config
+
     from source.utils import get_session
 
     logging.basicConfig(level=logging.INFO)

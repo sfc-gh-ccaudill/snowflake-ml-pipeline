@@ -18,17 +18,10 @@ import sys
 
 from snowflake.snowpark import Session
 
-logger = logging.getLogger(__name__)
+from source.configs import config_to_dict
+from source.framework.train import RayHPOConfig, RemoteTrainer
 
-_HPO_SEARCH_SPACE = {
-    "n_estimators":     {"type": "randint",    "lower": 50,   "upper": 500},
-    "max_depth":        {"type": "randint",    "lower": 3,    "upper": 20},
-    "learning_rate":    {"type": "loguniform", "lower": 1e-4, "upper": 0.3},
-    "subsample":        {"type": "uniform",    "lower": 0.5,  "upper": 1.0},
-    "colsample_bytree": {"type": "uniform",    "lower": 0.5,  "upper": 1.0},
-    "reg_alpha":        {"type": "loguniform", "lower": 1e-5, "upper": 10.0},
-    "reg_lambda":       {"type": "loguniform", "lower": 1e-5, "upper": 10.0},
-}
+logger = logging.getLogger(__name__)
 
 
 def run(config, session: Session) -> dict:
@@ -45,34 +38,32 @@ def run(config, session: Session) -> dict:
         dict with keys: status, job_id, best_score, best_params  — or
         {"status": "skipped", "reason": "tune_hpo=false"} when skipped.
     """
-    if not config.pipeline.tune_hpo:
+    if not config.tune.enabled:
         logger.info("tune_hpo is False — skipping hyperparameter tuning")
         return {"status": "skipped", "reason": "tune_hpo=false"}
-    from source.framework.train import RayHPOConfig, RemoteTrainer
-    from source.configs import config_to_dict
 
     db = config.snowflake.database
     schema = config.snowflake.schema_name
     compute_pool = config.compute.compute_pool
-    stage = f"{db}.{schema}.JOB_PAYLOADS"
-    pipeline_cfg = config.pipeline
+    stage = f"{db}.{schema}.{config.stages.job_payloads}"
+    tune_cfg = config.tune
 
     logger.info("=== Step 2b: Hyperparameter Tuning ===")
     logger.info(
         "search_alg=%s  scheduler=%s  num_samples=%d  num_instances=%d",
-        pipeline_cfg.hpo_search_alg,
-        pipeline_cfg.hpo_scheduler,
-        pipeline_cfg.hpo_num_samples,
-        pipeline_cfg.hpo_num_instances,
+        tune_cfg.search_alg,
+        tune_cfg.scheduler,
+        tune_cfg.num_samples,
+        tune_cfg.num_instances,
     )
 
     hpo_config = RayHPOConfig(
-        search_space=_HPO_SEARCH_SPACE,
-        metric="f1_macro",
-        mode="max",
-        num_samples=pipeline_cfg.hpo_num_samples,
-        scheduler=pipeline_cfg.hpo_scheduler,
-        search_alg=pipeline_cfg.hpo_search_alg,
+        search_space=tune_cfg.search_space,
+        metric=tune_cfg.metric,
+        mode=tune_cfg.mode,
+        num_samples=tune_cfg.num_samples,
+        scheduler=tune_cfg.scheduler,
+        search_alg=tune_cfg.search_alg,
     )
 
     trainer = RemoteTrainer(
@@ -85,7 +76,7 @@ def run(config, session: Session) -> dict:
     job = trainer.submit_hpo(
         hpo_config=hpo_config,
         entrypoint="train_hpo.py",
-        num_instances=pipeline_cfg.hpo_num_instances,
+        num_instances=tune_cfg.num_instances,
         env_vars={"ML_PIPELINE_CONFIG": json.dumps(config_to_dict(config))},
     )
 
@@ -102,7 +93,7 @@ def run(config, session: Session) -> dict:
     best_params = json.loads(best_row[0]["BEST_PARAMS"]) if best_row else {}
     best_score = float(best_row[0]["BEST_SCORE"]) if best_row else 0.0
 
-    logger.info("HPO complete — best f1_macro: %.4f  params: %s", best_score, best_params)
+    logger.info("HPO complete — best %s: %.4f  params: %s", config.tune.metric, best_score, best_params)
     logger.info("=== Step 2b complete ===")
 
     return {

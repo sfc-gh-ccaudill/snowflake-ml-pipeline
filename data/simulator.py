@@ -7,7 +7,7 @@ import logging
 import time
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -152,6 +152,76 @@ class StreamingDataSimulator:
             return "HIGH"
         else:
             return "CRITICAL"
+
+    @staticmethod
+    def compute_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df["SHOCK_INDEX"] = np.where(
+            df["SYSTOLIC_BP"] > 0, df["HEART_RATE"] / df["SYSTOLIC_BP"], np.nan
+        )
+        df["PULSE_PRESSURE"] = df["SYSTOLIC_BP"] - df["DIASTOLIC_BP"]
+        df["BMI_CATEGORY"] = pd.cut(
+            df["BMI"],
+            bins=[0, 18.5, 25, 30, 35, 100],
+            labels=["UNDERWEIGHT", "NORMAL", "OVERWEIGHT", "OBESE", "SEVERELY_OBESE"],
+        ).astype(str)
+        df["VITAL_SIGNS_SEVERITY"] = (
+            (df["HEART_RATE"] > 100).astype(int)
+            + (df["HEART_RATE"] < 60).astype(int)
+            + (df["RESPIRATORY_RATE"] > 20).astype(int)
+            + (df["OXYGEN_SATURATION"] < 94).astype(int) * 2
+            + (df["TEMPERATURE"] > 38.0).astype(int)
+            + (df["SYSTOLIC_BP"] < 90).astype(int) * 2
+            + (df["SYSTOLIC_BP"] > 180).astype(int)
+        )
+        return df
+
+    def generate_batch(
+        self,
+        batch_size: int = 10,
+        compute_features: bool = True,
+        write_to_table: bool = False,
+        table_name: str = "STREAMING_PATIENT_DATA",
+        columns: Optional[List[str]] = None,
+    ) -> pd.DataFrame:
+        records = []
+        for _ in range(batch_size):
+            record = self.generate_streaming_record()
+            if self.drift_enabled and self.drift_type:
+                record = self.introduce_drift(record, self.drift_type)
+            records.append(record)
+
+        df = pd.DataFrame(records)
+        df.columns = [c.upper() for c in df.columns]
+
+        if compute_features:
+            df = self.compute_engineered_features(df)
+
+        if write_to_table:
+            self.write_batch(df, table_name=table_name, columns=columns)
+
+        return df
+
+    def write_batch(
+        self,
+        df: pd.DataFrame,
+        table_name: str = "STREAMING_PATIENT_DATA",
+        columns: Optional[List[str]] = None,
+    ) -> None:
+        write_df = df[columns] if columns else df
+        write_df.columns = [c.upper() for c in write_df.columns]
+        self.session.write_pandas(
+            write_df,
+            table_name,
+            database=self.database,
+            schema=self.schema_name,
+            auto_create_table=False,
+            overwrite=False,
+        )
+        logger.info(
+            "Wrote %d rows to %s.%s.%s",
+            len(write_df), self.database, self.schema_name, table_name,
+        )
 
     def generate_streaming_record(self) -> dict:
         age = int(np.clip(np.random.normal(60, 15), 18, 100))
