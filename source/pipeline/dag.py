@@ -361,6 +361,11 @@ class PipelineDAG:
                 f"APPLY TAG ON ACCOUNT to role {role}",
                 f"Run manually: GRANT APPLY TAG ON ACCOUNT TO ROLE {role};",
             ),
+            (
+                f"GRANT EXECUTE ALERT ON ACCOUNT TO ROLE {role}",
+                f"EXECUTE ALERT ON ACCOUNT to role {role}",
+                f"Run manually: GRANT EXECUTE ALERT ON ACCOUNT TO ROLE {role};",
+            ),
         ]
         for sql, description, hint in grants:
             try:

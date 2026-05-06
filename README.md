@@ -4,7 +4,7 @@ A demonstration of an end-to-end, production-ready machine learning pipeline bui
 
 **Use case**: Patient Risk Stratification — classifying hospital patients as `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL` risk from clinical vitals and lab values using a distributed RandomForest classifier.
 
-**Key message**: Every component — data, feature store, distributed training, model registry, REST endpoint, drift monitoring, and pipeline orchestration — runs inside a single Snowflake account.
+**Key message**: Every component — data, feature store, distributed training, model registry, REST endpoint, drift monitoring, automated retraining alerts, and pipeline orchestration — runs inside a single Snowflake account.
 
 ---
 
@@ -27,34 +27,51 @@ Raw Patient Data (EHR)
         │
         ▼
 ┌───────────────────────┐
-│  STEP 2               │   Snowflake ML Jobs (SPCS)
-│  Distributed Training │   3-node distributed training on CPU_X64_S
-│  + Evaluation         │   Experiment tracking + Model Registry
-│                       │
-│  Promotion gate:      │
-│  accuracy ≥ 0.80      │
-│  f1_macro ≥ 0.75      │
+│  STEP 2b (optional)   │   Snowflake ML Jobs (SPCS)
+│  Hyperparameter       │   Ray Tune + ASHA scheduler
+│  Optimization         │   Configurable via tune.enabled in config
 └───────────────────────┘
         │
         ▼
 ┌───────────────────────┐
-│  STEP 3               │   Snowflake Model Serving (SPCS)
-│  REST Endpoint        │   Auto-scales 1–3 replicas
+│  STEP 2               │   Snowflake ML Jobs (SPCS)
+│  Distributed Training │   Multi-node distributed training on CPU_X64_S
+│                       │   Model registered in Snowflake Model Registry
+└───────────────────────┘
+        │
+        ▼
+┌───────────────────────┐
+│  STEP 3               │   Snowflake Model Registry
+│  Evaluation &         │   Metrics: accuracy, f1_macro, per-class F1
+│  Promotion Gate       │   Promotion thresholds:
+│                       │     accuracy ≥ 0.80, f1_macro ≥ 0.75
+└───────────────────────┘
+        │ (only if promoted)
+        ▼
+┌───────────────────────┐
+│  STEP 4               │   Snowflake Model Serving (SPCS)
+│  REST Endpoint        │   Auto-suspend after 1 hour idle
 │  Deployment           │   Zero external infrastructure
 └───────────────────────┘
         │
         ▼
 ┌───────────────────────┐
-│  STEP 4               │   Snowflake Model Monitor
-│  Drift Detection      │   Feature drift + prediction drift
-│                       │   Baseline: TEST_FEATURES (training distribution)
+│  STEP 5               │   Snowflake Model Monitor
+│  Drift Detection &    │   Feature drift + prediction drift
+│  Automated Retraining │   Baseline: TEST_FEATURES (training distribution)
+│                       │   Segmented by ADMISSION_TYPE, INSURANCE_TYPE
+│                       │
+│  Drift Alert:         │   Snowflake Alert checks PSI daily
+│  PSI > 0.25 triggers  │   → EXECUTE TASK re-runs full pipeline
+│  automatic retrain    │
 └───────────────────────┘
         │
         ▼
 ┌───────────────────────┐
 │  ORCHESTRATION        │   Snowflake Tasks (DAG)
 │  Task DAG             │   Weekly CRON schedule (Sun 02:00 AM PT)
-│                       │   ROOT → TRAIN → DEPLOY → MONITOR
+│                       │   FEATURE_ENG → HPO → TRAIN → EVALUATE
+│                       │     → DEPLOY → MONITOR
 └───────────────────────┘
 ```
 
@@ -65,7 +82,7 @@ Raw Patient Data (EHR)
 ```
 snowflake-ml-prod/
 ├── source/
-│   ├── config.yaml                         # All config: DB, schema, compute pool, features
+│   ├── config.yaml                         # All config: DB, schema, compute, features, thresholds
 │   ├── configs.py                          # PipelineConfig dataclasses
 │   ├── utils.py                            # get_session(), get_feature_config()
 │   ├── train.py                            # Training entrypoint (ML Jobs runs this)
@@ -76,15 +93,17 @@ snowflake-ml-prod/
 │   │   ├── evaluator.py                    # Evaluator (metrics + promotion gate)
 │   │   ├── deploy.py                       # ModelDeployer (REST endpoint)
 │   │   ├── hpo.py                          # Hyperparameter optimization
-│   │   └── monitor.py                      # ModelMonitor (drift detection)
+│   │   └── monitor.py                      # ModelMonitor (drift detection + alerts)
 │   └── pipeline/
 │       ├── step1_feature_engineering.py    # Feature Store setup + feature tables
-│       ├── step2_train_evaluate.py         # Distributed training + evaluation
+│       ├── step2_train.py                  # Distributed training
 │       ├── step2b_hpo.py                   # Optional HPO step
-│       ├── step3_deploy.py                 # REST endpoint deployment
-│       ├── step4_monitor.py                # Model monitor creation
+│       ├── step3_evaluate.py               # Model evaluation + promotion gate
+│       ├── step4_deploy.py                 # REST endpoint deployment
+│       ├── step5_monitor.py                # Model monitor + drift alert creation
 │       ├── dag.py                          # Task DAG creation + management
-│       └── execution_log.py               # Pipeline run logging
+│       ├── step_handler.py                 # Stored procedure handler factory
+│       └── pipeline_utils.py              # PipelineState + shared utilities
 ├── data/
 │   ├── historical.py                       # Synthetic patient data generator
 │   └── simulator.py                        # Streaming data simulator
@@ -96,17 +115,18 @@ snowflake-ml-prod/
 │   ├── network_setup.py
 │   └── tables_setup.py
 ├── notebooks/
-│   ├── pipeline_master.ipynb               # Full pipeline walkthrough
+│   ├── 01_setup_infrastructure.ipynb
+│   ├── 02_data_generation.ipynb
 │   ├── 03_preprocessing.ipynb
 │   ├── 04_model_training.ipynb
 │   ├── 05_model_deployment.ipynb
-│   ├── 07_model_monitoring.ipynb
-│   └── setup/
-│       ├── 01_setup_infrastructure.ipynb
-│       └── 02_data_generation.ipynb
+│   ├── 06_model_monitoring.ipynb
+│   ├── 07_streaming_inference.ipynb
+│   ├── 08_cleanup.ipynb
+│   └── deep_dive/
+│       └── feature_and_experiment/         # Advanced Feature Store + experiment notebooks
 └── docs/
-    ├── DEMO_GUIDE.md                       # Live demo script and talking points
-    └── presentation.html                   # Slide deck
+    └── DEMO_GUIDE.md                       # Live demo script and talking points
 ```
 
 ---
@@ -156,36 +176,72 @@ python -m data.historical  # seeds ~50,000 patient records
 # Step 1: Feature engineering + Feature Store registration
 python -m source.pipeline.step1_feature_engineering
 
-# Step 2: Distributed remote training + evaluation (3 nodes)
-NUM_TRAINING_INSTANCES=3 python -m source.pipeline.step2_train_evaluate
-
 # Step 2b (optional): Hyperparameter optimization
 python -m source.pipeline.step2b_hpo
 
-# Step 3: Deploy REST endpoint
-python -m source.pipeline.step3_deploy
+# Step 2: Distributed remote training
+python -m source.pipeline.step2_train
 
-# Step 4: Set up model monitor
-python -m source.pipeline.step4_monitor
+# Step 3: Model evaluation + promotion gate
+python -m source.pipeline.step3_evaluate
+
+# Step 4: Deploy REST endpoint
+python -m source.pipeline.step4_deploy
+
+# Step 5: Set up model monitor + drift alert
+python -m source.pipeline.step5_monitor
 ```
 
 ### Create and run the Task DAG
 
 ```bash
 # Create the DAG (does not execute immediately)
-python -m source.pipeline.dag
+python -m source.pipeline.dag --build
 
-# Trigger a full pipeline run on demand
+# Create DAG + trigger a full pipeline run
 python -m source.pipeline.dag --run
 
-# Remove the DAG
+# Remove all tasks and stored procedures
 python -m source.pipeline.dag --teardown
 ```
 
 ### Trigger via SQL
 
 ```sql
-EXECUTE TASK ML_DEMO_PIPELINE_DB.HEALTHCARE.PIPELINE_ROOT_TASK;
+EXECUTE TASK ML_DEMO_PIPELINE_DB.HEALTHCARE.PIPELINE_FEATURE_ENG_TASK;
+```
+
+### Task DAG Flow
+
+```
+PIPELINE_FEATURE_ENG_TASK  (weekly CRON: Sun 02:00 AM PT)
+  └── PIPELINE_HPO_TASK
+        └── PIPELINE_TRAIN_TASK
+              └── PIPELINE_EVALUATE_TASK
+                    └── PIPELINE_DEPLOY_TASK
+                          └── PIPELINE_MONITOR_TASK
+```
+
+---
+
+## Drift Alerting & Automated Retraining
+
+The monitoring step (Step 5) creates a Snowflake Alert (`PATIENT_RISK_DRIFT_ALERT`) that:
+
+1. Runs daily at 6 AM PT (configurable via `drift_alert_schedule`)
+2. Queries `MODEL_MONITOR_DRIFT_METRIC` for PSI on the prediction column
+3. If PSI exceeds the threshold (default `0.25`), triggers `EXECUTE TASK` on the root task to re-run the full pipeline
+
+Configure in `source/config.yaml`:
+
+```yaml
+monitor:
+  drift_alert_enabled: true
+  drift_alert_name: PATIENT_RISK_DRIFT_ALERT
+  drift_metric: POPULATION_STABILITY_INDEX
+  drift_threshold: 0.25
+  drift_alert_schedule: "USING CRON 0 6 * * * America/Los_Angeles"
+  retrain_root_task: PIPELINE_FEATURE_ENG_TASK
 ```
 
 ---
@@ -198,9 +254,16 @@ All pipeline behavior is controlled by `source/config.yaml`:
 |---|---|
 | `snowflake` | Connection name, database, schema, warehouse |
 | `compute` | Compute pool name, instance family, min/max nodes |
-| `model` | Model name, target platforms (WAREHOUSE / SPCS) |
-| `pipeline` | HPO toggle, HPO samples, search algorithm |
-| `feature_config` | Numeric features, categorical features, computed features, target column |
+| `model` | Model name, target platforms (WAREHOUSE / SPCS), model params |
+| `tables` | Raw data, test features, metrics table names |
+| `features` | Numeric features, categorical features, computed features, target column |
+| `feature_store` | Entity, join keys, feature view name/version, refresh frequency |
+| `train` | Number of distributed training nodes |
+| `tune` | HPO toggle, num samples, search algorithm, scheduler, search space |
+| `evaluation` | Accuracy and F1 macro promotion thresholds |
+| `deploy` | Service name, min/max instances, auto-suspend timeout |
+| `monitor` | Monitor name, drift alert config, threshold, schedule |
+| `stages` | Stage name for job payloads and artifacts |
 
 ---
 
@@ -211,9 +274,12 @@ All pipeline behavior is controlled by `source/config.yaml`:
 | Compute pool in IDLE state | `ALTER COMPUTE POOL ML_DEMO_COMPUTE_POOL RESUME;` |
 | ML Job stays PENDING | `DESCRIBE COMPUTE POOL ML_DEMO_COMPUTE_POOL;` to check node capacity |
 | Service not reaching RUNNING | `SHOW SERVICES;` → check `status_message` for image pull errors |
-| Feature Store "already exists" error | Safe to ignore — uses `CREATE_IF_NOT_EXIST` |
+| Feature Store "already exists" error | Safe to ignore — uses `overwrite=True` for idempotent runs |
 | Task stuck SUSPENDED | `ALTER TASK <TASK_NAME> RESUME;` then re-execute |
-| Monitor creation fails | Ensure `STREAMING_PATIENT_DATA` table exists and has rows |
+| Monitor creation fails | Ensure inference logs view exists and has rows |
+| `ModuleNotFoundError: dotenv` in SP | `deploy.py` guards this import; redeploy DAG to pick up fix |
+| `EXECUTE ALERT privilege` error | `GRANT EXECUTE ALERT ON ACCOUNT TO ROLE SYSADMIN;` (auto-granted on DAG build) |
+| Stale handler after redeploy | DAG uses timestamped stage paths to bust cache; run `--teardown` then `--build` |
 
 ---
 
