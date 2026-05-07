@@ -201,9 +201,7 @@ class TablesSetup:
             )
             logger.info(f"Dynamic table {table_name} ready")
         except Exception as e:
-            logger.warning(
-                f"Could not create dynamic table (may require source data): {e}"
-            )
+            logger.warning(f"Could not create dynamic table (may require source data): {e}")
 
     def get_table_list(self) -> List[str]:
         return [

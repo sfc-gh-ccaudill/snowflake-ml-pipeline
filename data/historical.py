@@ -3,9 +3,9 @@ Historical EMR data generator for Healthcare ML Pipeline.
 Generates realistic synthetic patient data with correlated features.
 """
 
+from datetime import datetime, timedelta
 import logging
 import uuid
-from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -66,9 +66,7 @@ class HistoricalDataGenerator:
             "oxygen_saturation": round(np.clip(spo2, 70, 100), 1),
         }
 
-    def _generate_lab_values(
-        self, age: int, risk_factor: float
-    ) -> dict:  # pylint: disable=unused-argument
+    def _generate_lab_values(self, age: int, risk_factor: float) -> dict:  # pylint: disable=unused-argument
         glucose = 100 + risk_factor * 120 + np.random.normal(0, 8)
         creatinine = 1.0 + risk_factor * 2.5 + np.random.normal(0, 0.1)
         hemoglobin = 14 - risk_factor * 5 + np.random.normal(0, 0.5)
@@ -152,21 +150,15 @@ class HistoricalDataGenerator:
             base_bmi = 26 if gender == "M" else 25
             bmi = round(np.clip(np.random.normal(base_bmi, 5), 16, 50), 1)
 
-            target_risk = np.random.choice(
-                [0.0, 0.33, 0.66, 1.0], p=[0.40, 0.35, 0.18, 0.07]
-            )
+            target_risk = np.random.choice([0.0, 0.33, 0.66, 1.0], p=[0.40, 0.35, 0.18, 0.07])
             risk_factor = np.clip(target_risk + np.random.normal(0, 0.08), 0, 1)
 
             vital_signs = self._generate_vital_signs(age, risk_factor)
             lab_values = self._generate_lab_values(age, risk_factor)
 
             comorbidities = int(np.clip(np.random.poisson(2 + risk_factor * 3), 0, 10))
-            previous_admissions = int(
-                np.clip(np.random.poisson(1 + risk_factor * 2), 0, 10)
-            )
-            medication_count = int(
-                np.clip(np.random.poisson(5 + comorbidities * 2), 0, 20)
-            )
+            previous_admissions = int(np.clip(np.random.poisson(1 + risk_factor * 2), 0, 10))
+            medication_count = int(np.clip(np.random.poisson(5 + comorbidities * 2), 0, 20))
 
             diagnosis = np.random.choice(DIAGNOSIS_CODES)
             admission_type = np.random.choice(
@@ -337,6 +329,7 @@ def main():
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     from configs import get_config
+
     from source.utils import get_session
 
     logging.basicConfig(level=logging.INFO)

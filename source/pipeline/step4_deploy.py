@@ -84,7 +84,7 @@ def run(config, session: Session, version_name: str = None) -> dict:
         compute_pool=compute_pool,
         min_instances=min_instances,
         max_instances=max_instances,
-        auto_suspend_secs=auto_suspend_secs
+        auto_suspend_secs=auto_suspend_secs,
     )
     logger.info("Service '%s' is RUNNING", service_name)
 

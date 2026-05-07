@@ -11,9 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class DatabaseSetup:
-    def __init__(
-        self, session: Session, database: str, schema_name: str, warehouse: str
-    ):
+    def __init__(self, session: Session, database: str, schema_name: str, warehouse: str):
         self.session = session
         self.database = database
         self.schema_name = schema_name
@@ -60,9 +58,7 @@ class DatabaseSetup:
             try:
                 self.session.sql(grant).collect()
             except Exception as e:
-                logger.warning(
-                    f"Grant may already exist or insufficient privileges: {e}"
-                )
+                logger.warning(f"Grant may already exist or insufficient privileges: {e}")
 
     def set_context(self) -> None:
         logger.info("Setting session context")
@@ -96,6 +92,7 @@ def main():
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     from configs import get_config
+
     from source.utils import get_session
 
     logging.basicConfig(level=logging.INFO)

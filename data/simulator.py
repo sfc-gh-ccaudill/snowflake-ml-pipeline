@@ -3,11 +3,11 @@ Streaming data simulator for Healthcare ML Pipeline.
 Continuously generates patient data at specified intervals.
 """
 
+from datetime import datetime
 import logging
 import time
-import uuid
-from datetime import datetime
 from typing import List, Optional
+import uuid
 
 import numpy as np
 import pandas as pd
@@ -34,9 +34,7 @@ GENDERS = ["M", "F", "Other"]
 
 DRIFT_TYPES = {
     "age_shift": {"column": "AGE", "shift": 10},
-    "vital_degradation": {
-        "columns": ["HEART_RATE", "SYSTOLIC_BP", "OXYGEN_SATURATION"]
-    },
+    "vital_degradation": {"columns": ["HEART_RATE", "SYSTOLIC_BP", "OXYGEN_SATURATION"]},
     "feature_scale": {"columns": ["GLUCOSE_LEVEL", "CREATININE"], "factor": 1.3},
     "distribution_shift": {"column": "ADMISSION_TYPE", "new_probs": [0.7, 0.2, 0.1]},
 }
@@ -80,9 +78,7 @@ class StreamingDataSimulator:
             "oxygen_saturation": round(np.clip(spo2, 70, 100), 1),
         }
 
-    def _generate_lab_values(
-        self, age: int, risk_factor: float
-    ) -> dict:  # pylint: disable=unused-argument
+    def _generate_lab_values(self, age: int, risk_factor: float) -> dict:  # pylint: disable=unused-argument
         glucose = 100 + risk_factor * 120 + np.random.normal(0, 8)
         creatinine = 1.0 + risk_factor * 2.5 + np.random.normal(0, 0.1)
         hemoglobin = 14 - risk_factor * 5 + np.random.normal(0, 0.5)
@@ -220,7 +216,10 @@ class StreamingDataSimulator:
         )
         logger.info(
             "Wrote %d rows to %s.%s.%s",
-            len(write_df), self.database, self.schema_name, table_name,
+            len(write_df),
+            self.database,
+            self.schema_name,
+            table_name,
         )
 
     def generate_streaming_record(self) -> dict:
@@ -230,18 +229,14 @@ class StreamingDataSimulator:
         base_bmi = 26 if gender == "M" else 25
         bmi = round(np.clip(np.random.normal(base_bmi, 5), 16, 50), 1)
 
-        target_risk = np.random.choice(
-            [0.0, 0.33, 0.66, 1.0], p=[0.40, 0.35, 0.18, 0.07]
-        )
+        target_risk = np.random.choice([0.0, 0.33, 0.66, 1.0], p=[0.40, 0.35, 0.18, 0.07])
         risk_factor = np.clip(target_risk + np.random.normal(0, 0.08), 0, 1)
 
         vital_signs = self._generate_vital_signs(age, risk_factor)
         lab_values = self._generate_lab_values(age, risk_factor)
 
         comorbidities = int(np.clip(np.random.poisson(2 + risk_factor * 3), 0, 10))
-        previous_admissions = int(
-            np.clip(np.random.poisson(1 + risk_factor * 2), 0, 10)
-        )
+        previous_admissions = int(np.clip(np.random.poisson(1 + risk_factor * 2), 0, 10))
         medication_count = int(np.clip(np.random.poisson(5 + comorbidities * 2), 0, 20))
 
         diagnosis = np.random.choice(DIAGNOSIS_CODES)
@@ -381,9 +376,7 @@ class StreamingDataSimulator:
                 if len(batch) >= batch_size:
                     self.insert_batch(batch, table_name)
                     batch = []
-                    logger.info(
-                        f"Inserted batch. Total records: {self.records_generated}"
-                    )
+                    logger.info(f"Inserted batch. Total records: {self.records_generated}")
 
                 time.sleep(interval_seconds)
 
@@ -401,9 +394,7 @@ class StreamingDataSimulator:
         result = {
             "records_generated": self.records_generated,
             "duration_seconds": duration,
-            "records_per_second": (
-                self.records_generated / duration if duration > 0 else 0
-            ),
+            "records_per_second": (self.records_generated / duration if duration > 0 else 0),
             "drift_enabled": self.drift_enabled,
             "drift_type": self.drift_type,
             "status": "success",
@@ -420,6 +411,7 @@ def main():
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     from configs import get_config
+
     from source.utils import get_session
 
     logging.basicConfig(level=logging.INFO)

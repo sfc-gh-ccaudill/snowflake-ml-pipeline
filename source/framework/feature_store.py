@@ -13,8 +13,8 @@ pre-computed, reusable features that encode domain knowledge.
 import logging
 from typing import Any, List
 
-import snowflake.snowpark.functions as F
 from snowflake.snowpark import Session
+import snowflake.snowpark.functions as F
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +49,7 @@ class FeatureStoreManager:
         logger.info("Feature Store initialized")
         return self.fs
 
-    def create_entity(
-        self, entity_name: str, join_keys: List, description: str = None
-    ) -> Any:
+    def create_entity(self, entity_name: str, join_keys: List, description: str = None) -> Any:
         from snowflake.ml.feature_store import Entity
 
         logger.info(f"Creating entity: {entity_name} with join keys: {join_keys}")
@@ -101,10 +99,14 @@ class FeatureStoreManager:
 
         try:
             existing = self.fs.get_feature_view(feature_view_name, version)
-            logger.info(f"Feature view {feature_view_name}/{version} already exists — using existing")
+            logger.info(
+                f"Feature view {feature_view_name}/{version} already exists — using existing"
+            )
             return existing
         except Exception as e:
-            logger.info(f"Feature view {feature_view_name}/{version} not found ({type(e).__name__}) — registering")
+            logger.info(
+                f"Feature view {feature_view_name}/{version} not found ({type(e).__name__}) — registering"
+            )
 
         fv = FeatureView(
             name=feature_view_name,
@@ -158,6 +160,3 @@ class FeatureStoreManager:
 
         fvs = self.fs.list_feature_views()
         return [fv.name for fv in fvs.collect()]
-
-
-

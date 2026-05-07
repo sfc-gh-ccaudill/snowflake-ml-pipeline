@@ -45,16 +45,16 @@ from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-_RAY_HEAD_PORT      = 6379
+_RAY_HEAD_PORT = 6379
 _RAY_DASHBOARD_PORT = 8265
-_RAY_WORKER_WAIT_S  = 15
+_RAY_WORKER_WAIT_S = 15
 _RAY_HEAD_STARTUP_S = 10
 
 _SEARCH_SPACE_BUILDERS = {
-    "randint":     lambda s: __import__("ray").tune.randint(s["lower"], s["upper"]),
-    "uniform":     lambda s: __import__("ray").tune.uniform(s["lower"], s["upper"]),
-    "loguniform":  lambda s: __import__("ray").tune.loguniform(s["lower"], s["upper"]),
-    "choice":      lambda s: __import__("ray").tune.choice(s["values"]),
+    "randint": lambda s: __import__("ray").tune.randint(s["lower"], s["upper"]),
+    "uniform": lambda s: __import__("ray").tune.uniform(s["lower"], s["upper"]),
+    "loguniform": lambda s: __import__("ray").tune.loguniform(s["lower"], s["upper"]),
+    "choice": lambda s: __import__("ray").tune.choice(s["values"]),
     "grid_search": lambda s: __import__("ray").tune.grid_search(s["values"]),
 }
 
@@ -81,15 +81,15 @@ class RayTuneRunner:
     """
 
     def __init__(self, cfg: Dict[str, Any]) -> None:
-        self.metric               = cfg["metric"]
-        self.mode                 = cfg.get("mode", "max")
-        self.num_samples          = int(cfg.get("num_samples", 20))
+        self.metric = cfg["metric"]
+        self.mode = cfg.get("mode", "max")
+        self.num_samples = int(cfg.get("num_samples", 20))
         self.max_concurrent_trials = cfg.get("max_concurrent_trials")
-        self.scheduler_name       = cfg.get("scheduler", "asha")
-        self.search_alg_name      = cfg.get("search_alg", "random")
-        self.grace_period         = int(cfg.get("grace_period", 1))
-        self.reduction_factor     = int(cfg.get("reduction_factor", 2))
-        self._raw_search_space    = cfg["search_space"]
+        self.scheduler_name = cfg.get("scheduler", "asha")
+        self.search_alg_name = cfg.get("search_alg", "random")
+        self.grace_period = int(cfg.get("grace_period", 1))
+        self.reduction_factor = int(cfg.get("reduction_factor", 2))
+        self._raw_search_space = cfg["search_space"]
 
     @classmethod
     def from_env(cls) -> "RayTuneRunner":
@@ -98,14 +98,14 @@ class RayTuneRunner:
         cfg = json.loads(raw)
         if not cfg:
             raise ValueError(
-                "HPO_CONFIG_JSON is not set or empty — "
-                "was RemoteTrainer.submit_hpo() used to launch this job?"
+                "HPO_CONFIG_JSON is not set or empty — was RemoteTrainer.submit_hpo() used to launch this job?"
             )
         return cls(cfg)
 
     def _log_dashboard_url(self) -> None:
         """Log the Ray dashboard URL after the cluster is initialised."""
         import ray
+
         url = ray.get_dashboard_url()
         if url:
             logger.info("Ray dashboard URL : http://%s", url)
@@ -130,19 +130,23 @@ class RayTuneRunner:
         """
         import ray
 
-        rank        = int(os.environ.get("RANK", 0))
-        world_size  = int(os.environ.get("WORLD_SIZE", 1))
+        rank = int(os.environ.get("RANK", 0))
+        world_size = int(os.environ.get("WORLD_SIZE", 1))
         master_addr = os.environ.get("MASTER_ADDR", "localhost")
 
         if world_size > 1:
             if rank == 0:
                 logger.info("Starting Ray head node (port=%d)", _RAY_HEAD_PORT)
-                subprocess.Popen([
-                    "ray", "start", "--head",
-                    f"--port={_RAY_HEAD_PORT}",
-                    "--dashboard-host=0.0.0.0",
-                    f"--dashboard-port={_RAY_DASHBOARD_PORT}",
-                ])
+                subprocess.Popen(
+                    [
+                        "ray",
+                        "start",
+                        "--head",
+                        f"--port={_RAY_HEAD_PORT}",
+                        "--dashboard-host=0.0.0.0",
+                        f"--dashboard-port={_RAY_DASHBOARD_PORT}",
+                    ]
+                )
                 time.sleep(_RAY_HEAD_STARTUP_S)
                 ray.init(f"ray://localhost:{_RAY_HEAD_PORT}", ignore_reinit_error=True)
                 self._log_dashboard_url()
@@ -150,13 +154,18 @@ class RayTuneRunner:
             else:
                 logger.info(
                     "Worker (rank=%d) connecting to head at %s:%d",
-                    rank, master_addr, _RAY_HEAD_PORT,
+                    rank,
+                    master_addr,
+                    _RAY_HEAD_PORT,
                 )
                 time.sleep(_RAY_WORKER_WAIT_S)
-                subprocess.Popen([
-                    "ray", "start",
-                    f"--address={master_addr}:{_RAY_HEAD_PORT}",
-                ])
+                subprocess.Popen(
+                    [
+                        "ray",
+                        "start",
+                        f"--address={master_addr}:{_RAY_HEAD_PORT}",
+                    ]
+                )
                 time.sleep(_RAY_HEAD_STARTUP_S)
                 ray.init(address="auto", ignore_reinit_error=True)
                 logger.info("Worker rank=%d ready — waiting for trial dispatch", rank)
@@ -189,10 +198,10 @@ class RayTuneRunner:
         from ray import tune
 
         builders = {
-            "randint":     lambda s: tune.randint(s["lower"], s["upper"]),
-            "uniform":     lambda s: tune.uniform(s["lower"], s["upper"]),
-            "loguniform":  lambda s: tune.loguniform(s["lower"], s["upper"]),
-            "choice":      lambda s: tune.choice(s["values"]),
+            "randint": lambda s: tune.randint(s["lower"], s["upper"]),
+            "uniform": lambda s: tune.uniform(s["lower"], s["upper"]),
+            "loguniform": lambda s: tune.loguniform(s["lower"], s["upper"]),
+            "choice": lambda s: tune.choice(s["values"]),
             "grid_search": lambda s: tune.grid_search(s["values"]),
         }
         out: Dict[str, Any] = {}
@@ -200,8 +209,7 @@ class RayTuneRunner:
             t = spec.get("type")
             if t not in builders:
                 raise ValueError(
-                    f"Unknown search-space type {t!r} for parameter {key!r}. "
-                    f"Valid types: {list(builders)}"
+                    f"Unknown search-space type {t!r} for parameter {key!r}. Valid types: {list(builders)}"
                 )
             out[key] = builders[t](spec)
         return out
@@ -209,6 +217,7 @@ class RayTuneRunner:
     def _build_scheduler(self) -> Optional[Any]:
         if self.scheduler_name == "asha":
             from ray.tune.schedulers import ASHAScheduler
+
             return ASHAScheduler(
                 grace_period=self.grace_period,
                 reduction_factor=self.reduction_factor,
@@ -218,9 +227,11 @@ class RayTuneRunner:
     def _build_search_alg(self) -> Optional[Any]:
         if self.search_alg_name == "optuna":
             from ray.tune.search.optuna import OptunaSearch
+
             return OptunaSearch(metric=self.metric, mode=self.mode)
         if self.search_alg_name == "hyperopt":
             from ray.tune.search.hyperopt import HyperOptSearch
+
             return HyperOptSearch(metric=self.metric, mode=self.mode)
         return None
 
@@ -242,13 +253,16 @@ class RayTuneRunner:
         from ray import tune
 
         param_space = self.reconstruct_search_space(self._raw_search_space)
-        scheduler   = self._build_scheduler()
-        search_alg  = self._build_search_alg()
+        scheduler = self._build_scheduler()
+        search_alg = self._build_search_alg()
 
         logger.info(
             "Starting Tune search: %d trials, alg=%s, scheduler=%s, metric=%s (%s)",
-            self.num_samples, self.search_alg_name,
-            self.scheduler_name, self.metric, self.mode,
+            self.num_samples,
+            self.search_alg_name,
+            self.scheduler_name,
+            self.metric,
+            self.mode,
         )
 
         tuner = tune.Tuner(
@@ -336,5 +350,6 @@ class RayTuneRunner:
     def shutdown(self) -> None:
         """Shut down the Ray cluster."""
         import ray
+
         ray.shutdown()
         logger.info("Ray cluster shut down")

@@ -93,7 +93,9 @@ def run(config, session: Session) -> dict:
     best_params = json.loads(best_row[0]["BEST_PARAMS"]) if best_row else {}
     best_score = float(best_row[0]["BEST_SCORE"]) if best_row else 0.0
 
-    logger.info("HPO complete — best %s: %.4f  params: %s", config.tune.metric, best_score, best_params)
+    logger.info(
+        "HPO complete — best %s: %.4f  params: %s", config.tune.metric, best_score, best_params
+    )
     logger.info("=== Step 2b complete ===")
 
     return {

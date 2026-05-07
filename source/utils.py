@@ -90,7 +90,9 @@ def get_feature_config(config: Dict) -> Dict[str, Any]:
     }
 
 
-def get_model_version(session: Session, db: str, schema: str, model_name: str, version: Optional[str] = None):
+def get_model_version(
+    session: Session, db: str, schema: str, model_name: str, version: Optional[str] = None
+):
     """Get Model Version from Registry"""
     registry = Registry(session, database_name=db, schema_name=schema)
     model = registry.get_model(model_name)

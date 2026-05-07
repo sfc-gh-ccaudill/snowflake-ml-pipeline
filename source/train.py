@@ -2,19 +2,18 @@
 Patient Risk Stratification Training Pipeline.
 """
 
+from datetime import datetime
 import json
 import logging
 import os
 import time
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import (accuracy_score, f1_score, precision_score,
-                             recall_score)
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from snowflake.ml.experiment import ExperimentTracking
@@ -43,14 +42,18 @@ class PatientRiskTraining:
         self.schema_name = schema_name
 
     def create_training_pipeline(self, numeric_columns, categorical_columns, model_params):
-        numeric_transformer = Pipeline([
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
-        ])
-        categorical_transformer = Pipeline([
-            ("imputer", SimpleImputer(strategy="constant", fill_value="Unknown")),
-            ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
-        ])
+        numeric_transformer = Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="median")),
+                ("scaler", StandardScaler()),
+            ]
+        )
+        categorical_transformer = Pipeline(
+            [
+                ("imputer", SimpleImputer(strategy="constant", fill_value="Unknown")),
+                ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+            ]
+        )
         preprocessor = ColumnTransformer(
             transformers=[
                 ("num", numeric_transformer, numeric_columns),
@@ -58,17 +61,21 @@ class PatientRiskTraining:
             ],
             remainder="drop",
         )
-        return Pipeline([
-            ("preprocessor", preprocessor),
-            ("model", RandomForestClassifier(**model_params)),
-        ])
+        return Pipeline(
+            [
+                ("preprocessor", preprocessor),
+                ("model", RandomForestClassifier(**model_params)),
+            ]
+        )
 
     def calculate_metrics(self, y_test, y_pred):
         return {
-            "test_accuracy":  float(accuracy_score(y_test, y_pred)),
-            "test_precision": float(precision_score(y_test, y_pred, average="weighted", zero_division=0)),
-            "test_recall":    float(recall_score(y_test, y_pred, average="weighted", zero_division=0)),
-            "test_f1":        float(f1_score(y_test, y_pred, average="weighted", zero_division=0)),
+            "test_accuracy": float(accuracy_score(y_test, y_pred)),
+            "test_precision": float(
+                precision_score(y_test, y_pred, average="weighted", zero_division=0)
+            ),
+            "test_recall": float(recall_score(y_test, y_pred, average="weighted", zero_division=0)),
+            "test_f1": float(f1_score(y_test, y_pred, average="weighted", zero_division=0)),
         }
 
     def train(
@@ -82,7 +89,6 @@ class PatientRiskTraining:
         log_experiment: bool = True,
         register_model: bool = True,
     ) -> Dict[str, Any]:
-
         numeric_columns = feature_config["all_numeric_features"]
         categorical_columns = feature_config["all_categorical_features"]
         feature_columns = numeric_columns + categorical_columns
@@ -127,12 +133,14 @@ class PatientRiskTraining:
         run_name = f"baseline_{int(time.time())}"
         with exp.start_run(run_name):
             exp.log_params({**model_params, "run_type": "baseline"})
-            exp.log_metrics({
-                "test_accuracy":  metrics["test_accuracy"],
-                "test_precision": metrics["test_precision"],
-                "test_recall":    metrics["test_recall"],
-                "test_f1":        metrics["test_f1"],
-            })
+            exp.log_metrics(
+                {
+                    "test_accuracy": metrics["test_accuracy"],
+                    "test_precision": metrics["test_precision"],
+                    "test_recall": metrics["test_recall"],
+                    "test_f1": metrics["test_f1"],
+                }
+            )
         logger.info("Logged run '%s' to experiment %s", run_name, experiment_name)
 
     def register_model(self, model, model_name, train_data, metrics, target_platforms):
@@ -182,7 +190,9 @@ def main():
 
     feature_config = get_feature_config(config)
 
-    dataset_name    = os.environ.get("TRAINING_DATASET_NAME") or config.feature_store.training_dataset_name
+    dataset_name = (
+        os.environ.get("TRAINING_DATASET_NAME") or config.feature_store.training_dataset_name
+    )
     dataset_version = os.environ.get("TRAINING_DATASET_VERSION") or None
 
     logger.info("Loading training dataset: %s / %s", dataset_name, dataset_version)
@@ -206,9 +216,9 @@ def main():
         target_platforms=config.model.target_platforms,
         model_params={
             "n_estimators": config.model.params.n_estimators,
-            "class_weight":  config.model.params.class_weight,
-            "random_state":  config.model.params.random_state,
-            "n_jobs":        config.model.params.n_jobs,
+            "class_weight": config.model.params.class_weight,
+            "random_state": config.model.params.random_state,
+            "n_jobs": config.model.params.n_jobs,
         },
     )
 

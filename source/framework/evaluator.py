@@ -13,10 +13,10 @@ Key Features:
     - Promotion criteria checking with configurable thresholds
 """
 
-import logging
-import uuid
 from datetime import datetime
+import logging
 from typing import Any, Dict, List, Optional
+import uuid
 
 import numpy as np
 import pandas as pd
@@ -107,19 +107,13 @@ class Evaluator:
         accuracy = accuracy_score(y_true, y_pred)
 
         # Macro-averaged metrics (unweighted mean across classes)
-        precision_macro = precision_score(
-            y_true, y_pred, average="macro", zero_division=0
-        )
+        precision_macro = precision_score(y_true, y_pred, average="macro", zero_division=0)
         recall_macro = recall_score(y_true, y_pred, average="macro", zero_division=0)
         f1_macro = f1_score(y_true, y_pred, average="macro", zero_division=0)
 
         # Weighted-averaged metrics (weighted by class frequency)
-        precision_weighted = precision_score(
-            y_true, y_pred, average="weighted", zero_division=0
-        )
-        recall_weighted = recall_score(
-            y_true, y_pred, average="weighted", zero_division=0
-        )
+        precision_weighted = precision_score(y_true, y_pred, average="weighted", zero_division=0)
+        recall_weighted = recall_score(y_true, y_pred, average="weighted", zero_division=0)
         f1_weighted = f1_score(y_true, y_pred, average="weighted", zero_division=0)
 
         # Confusion matrix
@@ -156,20 +150,14 @@ class Evaluator:
                     "precision": float(
                         precision_score(y_true_binary, y_pred_binary, zero_division=0)
                     ),
-                    "recall": float(
-                        recall_score(y_true_binary, y_pred_binary, zero_division=0)
-                    ),
-                    "f1": float(
-                        f1_score(y_true_binary, y_pred_binary, zero_division=0)
-                    ),
+                    "recall": float(recall_score(y_true_binary, y_pred_binary, zero_division=0)),
+                    "f1": float(f1_score(y_true_binary, y_pred_binary, zero_division=0)),
                     "support": int(np.sum(y_true == label)),
                 }
 
             metrics["per_class"] = per_class_metrics
 
-        logger.info(
-            f"Computed metrics: accuracy={accuracy:.4f}, f1_macro={f1_macro:.4f}"
-        )
+        logger.info(f"Computed metrics: accuracy={accuracy:.4f}, f1_macro={f1_macro:.4f}")
 
         return metrics
 
@@ -386,8 +374,7 @@ class Evaluator:
                         {
                             "METRIC_ID": f"M{uuid.uuid4().hex[:8].upper()}",
                             "MODEL_NAME": model_name or metrics.get("model_name"),
-                            "MODEL_VERSION": model_version
-                            or metrics.get("model_version"),
+                            "MODEL_VERSION": model_version or metrics.get("model_version"),
                             "METRIC_NAME": f"{class_label}_{metric_name}",
                             "METRIC_VALUE": float(metric_value),
                             "METRIC_DETAILS": None,
@@ -455,8 +442,7 @@ class Evaluator:
             if not passed:
                 result["should_promote"] = False
                 logger.warning(
-                    f"Promotion check failed for {metric_name}: "
-                    f"{actual_value:.4f} < {threshold:.4f}"
+                    f"Promotion check failed for {metric_name}: {actual_value:.4f} < {threshold:.4f}"
                 )
 
         if result["should_promote"]:
@@ -541,13 +527,9 @@ class Evaluator:
                 status = "PASSED" if check.get("passed") else "FAILED"
                 threshold = check.get("threshold", "N/A")
                 actual = check.get("actual", "N/A")
-                report.append(
-                    f"{metric_name}: {status} (threshold: {threshold}, actual: {actual})"
-                )
+                report.append(f"{metric_name}: {status} (threshold: {threshold}, actual: {actual})")
 
-            overall_status = (
-                "APPROVED" if promotion_result.get("should_promote") else "REJECTED"
-            )
+            overall_status = "APPROVED" if promotion_result.get("should_promote") else "REJECTED"
             report.append(f"\nPromotion Status: {overall_status}")
 
         report.append("\n" + "=" * 60)

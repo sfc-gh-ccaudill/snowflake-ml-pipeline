@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 def _get_registry(session: Session, database: str, schema: str):
     from snowflake.ml.registry import Registry
+
     return Registry(session, database_name=database, schema_name=schema)
 
 
@@ -100,13 +101,13 @@ class ModelMonitor:
                 such as admission type or insurance type.
         """
         from snowflake.ml.monitoring.entities.model_monitor_config import (
-            ModelMonitorConfig, ModelMonitorSourceConfig)
+            ModelMonitorConfig,
+            ModelMonitorSourceConfig,
+        )
 
         id_columns = id_columns or ["PATIENT_ID"]
 
-        logger.info(
-            "Creating monitor '%s' for %s/%s", monitor_name, model_name, version_name
-        )
+        logger.info("Creating monitor '%s' for %s/%s", monitor_name, model_name, version_name)
 
         registry = _get_registry(self.session, self.database, self.schema)
         mv = registry.get_model(model_name).version(version_name)
@@ -124,9 +125,7 @@ class ModelMonitor:
         monitor_config = ModelMonitorConfig(
             model_version=mv,
             model_function_name="predict",
-            background_compute_warehouse_name=(
-                warehouse or self.session.get_current_warehouse()
-            ),
+            background_compute_warehouse_name=(warehouse or self.session.get_current_warehouse()),
         )
 
         try:

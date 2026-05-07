@@ -75,9 +75,9 @@ def make_handler(
         config_dict = json.loads(config_json)
 
         try:
-            raw = session.sql(
-                "SELECT SYSTEM$TASK_RUNTIME_INFO('CURRENT_TASK_CONFIG')"
-            ).collect()[0][0]
+            raw = session.sql("SELECT SYSTEM$TASK_RUNTIME_INFO('CURRENT_TASK_CONFIG')").collect()[
+                0
+            ][0]
             if raw:
                 overrides = json.loads(raw)
 
@@ -109,14 +109,22 @@ def make_handler(
             if _status not in ("skipped", "failed"):
                 _status = "success"
             _log.log_task_end(
-                _run_id, task_key, _t0, _status,
-                details=_json_safe(result), is_final=is_final,
+                _run_id,
+                task_key,
+                _t0,
+                _status,
+                details=_json_safe(result),
+                is_final=is_final,
             )
         except Exception as _exc:
             try:
                 _log.log_task_end(
-                    _run_id, task_key, _t0, "failed",
-                    details={"error": str(_exc)}, is_final=is_final,
+                    _run_id,
+                    task_key,
+                    _t0,
+                    "failed",
+                    details={"error": str(_exc)},
+                    is_final=is_final,
                 )
             except Exception:
                 pass

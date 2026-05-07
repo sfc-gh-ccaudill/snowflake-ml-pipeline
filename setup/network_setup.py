@@ -15,7 +15,7 @@ from snowflake.snowpark import Session
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_RULE        = "PYPI_NETWORK_RULE"
+_DEFAULT_RULE = "PYPI_NETWORK_RULE"
 _DEFAULT_INTEGRATION = "PYPI_ACCESS_INTEGRATION"
 _PYPI_HOSTS = (
     "pypi.org",
@@ -48,12 +48,12 @@ class NetworkSetup:
         network_rule: str = _DEFAULT_RULE,
         integration_name: str = _DEFAULT_INTEGRATION,
     ):
-        self.session          = session
-        self.database         = database
-        self.schema           = schema
-        self.network_rule     = network_rule
+        self.session = session
+        self.database = database
+        self.schema = schema
+        self.network_rule = network_rule
         self.integration_name = integration_name
-        self._fq_rule         = f"{database}.{schema}.{network_rule}"
+        self._fq_rule = f"{database}.{schema}.{network_rule}"
 
     def create_network_rule(self) -> dict:
         hosts = ", ".join(f"'{h}'" for h in _PYPI_HOSTS)
@@ -77,14 +77,16 @@ class NetworkSetup:
         and grant usage.  Useful when the current role lacks CREATE INTEGRATION.
         """
         role = grant_to_role or self.session.get_current_role()
-        return "\n".join([
-            f"-- Run as ACCOUNTADMIN",
-            f"CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION {self.integration_name}",
-            f"    ALLOWED_NETWORK_RULES = ({self._fq_rule})",
-            f"    ENABLED = TRUE;",
-            f"",
-            f"GRANT USAGE ON INTEGRATION {self.integration_name} TO ROLE {role};",
-        ])
+        return "\n".join(
+            [
+                f"-- Run as ACCOUNTADMIN",
+                f"CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION {self.integration_name}",
+                f"    ALLOWED_NETWORK_RULES = ({self._fq_rule})",
+                f"    ENABLED = TRUE;",
+                f"",
+                f"GRANT USAGE ON INTEGRATION {self.integration_name} TO ROLE {role};",
+            ]
+        )
 
     def create_external_access_integration(self) -> dict:
         logger.info("Creating external access integration: %s", self.integration_name)
@@ -101,11 +103,17 @@ class NetworkSetup:
         try:
             _create()
             logger.info("External access integration created: %s", self.integration_name)
-            return {"created": True, "name": self.integration_name, "needs_admin": False,
-                    "role_used": original_role}
+            return {
+                "created": True,
+                "name": self.integration_name,
+                "needs_admin": False,
+                "role_used": original_role,
+            }
         except Exception as first_exc:
-            if "insufficient privileges" not in str(first_exc).lower() \
-                    and "access control error" not in str(first_exc).lower():
+            if (
+                "insufficient privileges" not in str(first_exc).lower()
+                and "access control error" not in str(first_exc).lower()
+            ):
                 logger.error("Failed to create external access integration: %s", first_exc)
                 return {"created": False, "needs_admin": False, "error": str(first_exc)}
 
@@ -121,17 +129,26 @@ class NetworkSetup:
                 "External access integration created as ACCOUNTADMIN: %s",
                 self.integration_name,
             )
-            return {"created": True, "name": self.integration_name, "needs_admin": False,
-                    "role_used": "ACCOUNTADMIN"}
+            return {
+                "created": True,
+                "name": self.integration_name,
+                "needs_admin": False,
+                "role_used": "ACCOUNTADMIN",
+            }
         except Exception as admin_exc:
-            if "insufficient privileges" in str(admin_exc).lower() \
-                    or "access control error" in str(admin_exc).lower():
+            if (
+                "insufficient privileges" in str(admin_exc).lower()
+                or "access control error" in str(admin_exc).lower()
+            ):
                 logger.warning(
                     "ACCOUNTADMIN also unavailable. Run the following SQL manually:\n\n%s",
                     self.admin_sql(original_role),
                 )
-                return {"created": False, "needs_admin": True,
-                        "admin_sql": self.admin_sql(original_role)}
+                return {
+                    "created": False,
+                    "needs_admin": True,
+                    "admin_sql": self.admin_sql(original_role),
+                }
             logger.error("Failed even as ACCOUNTADMIN: %s", admin_exc)
             return {"created": False, "needs_admin": False, "error": str(admin_exc)}
         finally:
@@ -144,8 +161,7 @@ class NetworkSetup:
 
     def grant_usage(self, role: Optional[str] = None) -> dict:
         role = role or self.session.get_current_role()
-        logger.info("Granting USAGE on integration %s to role %s",
-                    self.integration_name, role)
+        logger.info("Granting USAGE on integration %s to role %s", self.integration_name, role)
         try:
             self.session.sql(f"""
                 GRANT USAGE ON INTEGRATION {self.integration_name} TO ROLE {role}
@@ -163,7 +179,7 @@ class NetworkSetup:
             if rows:
                 row = rows[0]
                 return {
-                    "name":    row["name"],
+                    "name": row["name"],
                     "enabled": row["enabled"],
                     "comment": row.get("comment", ""),
                 }
@@ -183,8 +199,8 @@ class NetworkSetup:
             network_rule, integration, grant, status, integration_name
         """
         logger.info("=== Network egress setup ===")
-        rule_result  = self.create_network_rule()
-        eai_result   = self.create_external_access_integration()
+        rule_result = self.create_network_rule()
+        eai_result = self.create_external_access_integration()
 
         # Only attempt grant if integration was created successfully
         if eai_result.get("created"):
@@ -196,9 +212,9 @@ class NetworkSetup:
 
         logger.info("=== Network egress setup complete ===")
         return {
-            "network_rule":     rule_result,
-            "integration":      eai_result,
-            "grant":            grant_result,
-            "status":           status,
+            "network_rule": rule_result,
+            "integration": eai_result,
+            "grant": grant_result,
+            "status": status,
             "integration_name": self.integration_name,
         }

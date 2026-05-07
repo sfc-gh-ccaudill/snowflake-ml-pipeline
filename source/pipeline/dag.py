@@ -30,10 +30,10 @@ import argparse
 import json
 import logging
 import os
+from pathlib import Path
 import sys
 import tempfile
 import zipfile
-from pathlib import Path
 
 from snowflake.snowpark import Session
 from snowflake.snowpark.types import VariantType
@@ -49,74 +49,74 @@ _STEPS: list[dict] = [
     {
         "proc_name": "RUN_FEATURE_ENGINEERING",
         "task_name": "PIPELINE_FEATURE_ENG_TASK",
-        "task_key":  "feature_engineering",
-        "imports":   "source.pipeline.step1_feature_engineering",
+        "task_key": "feature_engineering",
+        "imports": "source.pipeline.step1_feature_engineering",
         "step_func": "run",
         "description": "Step 1 — Feature Engineering & Feature Store",
-        "after":     None,
-        "schedule":  "USING CRON 0 2 * * 0 America/Los_Angeles",
-        "when":      None,
-        "is_final":  False,
+        "after": None,
+        "schedule": "USING CRON 0 2 * * 0 America/Los_Angeles",
+        "when": None,
+        "is_final": False,
     },
     {
         "proc_name": "RUN_HPO",
         "task_name": "PIPELINE_HPO_TASK",
-        "task_key":  "hpo",
-        "imports":   "source.pipeline.step2b_hpo",
+        "task_key": "hpo",
+        "imports": "source.pipeline.step2b_hpo",
         "step_func": "run",
         "description": "Step 2b — Hyperparameter Tuning (skips internally if tune.enabled=false)",
-        "after":     "PIPELINE_FEATURE_ENG_TASK",
-        "schedule":  None,
-        "when":      None,
-        "is_final":  False,
+        "after": "PIPELINE_FEATURE_ENG_TASK",
+        "schedule": None,
+        "when": None,
+        "is_final": False,
     },
     {
         "proc_name": "RUN_TRAIN",
         "task_name": "PIPELINE_TRAIN_TASK",
-        "task_key":  "training",
-        "imports":   "source.pipeline.step2_train",
+        "task_key": "training",
+        "imports": "source.pipeline.step2_train",
         "step_func": "run",
         "description": "Step 2 — Distributed Training",
-        "after":     "PIPELINE_HPO_TASK",
-        "schedule":  None,
-        "when":      None,
-        "is_final":  False,
+        "after": "PIPELINE_HPO_TASK",
+        "schedule": None,
+        "when": None,
+        "is_final": False,
     },
     {
         "proc_name": "RUN_EVALUATE",
         "task_name": "PIPELINE_EVALUATE_TASK",
-        "task_key":  "evaluation",
-        "imports":   "source.pipeline.step3_evaluate",
+        "task_key": "evaluation",
+        "imports": "source.pipeline.step3_evaluate",
         "step_func": "run",
         "description": "Step 3 — Model Evaluation & Promotion Gate",
-        "after":     "PIPELINE_TRAIN_TASK",
-        "schedule":  None,
-        "when":      None,
-        "is_final":  False,
+        "after": "PIPELINE_TRAIN_TASK",
+        "schedule": None,
+        "when": None,
+        "is_final": False,
     },
     {
         "proc_name": "RUN_DEPLOY",
         "task_name": "PIPELINE_DEPLOY_TASK",
-        "task_key":  "deployment",
-        "imports":   "source.pipeline.step4_deploy",
+        "task_key": "deployment",
+        "imports": "source.pipeline.step4_deploy",
         "step_func": "run",
         "description": "Step 4 — REST Endpoint Deployment",
-        "after":     "PIPELINE_EVALUATE_TASK",
-        "schedule":  None,
-        "when":      None,
-        "is_final":  False,
+        "after": "PIPELINE_EVALUATE_TASK",
+        "schedule": None,
+        "when": None,
+        "is_final": False,
     },
     {
         "proc_name": "RUN_MONITOR_SETUP",
         "task_name": "PIPELINE_MONITOR_TASK",
-        "task_key":  "monitoring",
-        "imports":   "source.pipeline.step5_monitor",
+        "task_key": "monitoring",
+        "imports": "source.pipeline.step5_monitor",
         "step_func": "run",
         "description": "Step 5 — Model Monitor Setup",
-        "after":     "PIPELINE_DEPLOY_TASK",
-        "schedule":  None,
-        "when":      None,
-        "is_final":  True,
+        "after": "PIPELINE_DEPLOY_TASK",
+        "schedule": None,
+        "when": None,
+        "is_final": True,
     },
 ]
 
@@ -159,7 +159,6 @@ class PipelineDAG:
 
         for step in _STEPS:
             self._register_step_procedure(step, source_zip_path, config_json, deploy_ts)
-
 
         for step in _STEPS:
             self._create_task(step)
@@ -374,7 +373,9 @@ class PipelineDAG:
             except Exception as e:
                 logger.warning(
                     "Could not auto-grant %s (need ACCOUNTADMIN). %s  Error: %s",
-                    description, hint, e,
+                    description,
+                    hint,
+                    e,
                 )
 
     def _print_dag_summary(self) -> None:

@@ -35,17 +35,16 @@ PIPELINE_STATE
   UPDATED_AT  TIMESTAMP_NTZ
 """
 
+from datetime import datetime, timezone
 import json
 import logging
 import time
-import uuid
-from datetime import datetime, timezone
 from typing import Optional
+import uuid
 
 from snowflake.snowpark import Session
 
 logger = logging.getLogger(__name__)
-
 
 
 def _get_run_id(session: Session) -> str:
@@ -102,8 +101,7 @@ class PipelineExecutionLogger:
 
     def _read_steps(self, run_id: str) -> dict:
         rows = self.session.sql(
-            f"SELECT TASK_STEPS FROM {self.table} "
-            f"WHERE PIPELINE_RUN_ID = '{run_id}'"
+            f"SELECT TASK_STEPS FROM {self.table} WHERE PIPELINE_RUN_ID = '{run_id}'"
         ).collect()
         if rows and rows[0][0] is not None:
             raw = rows[0][0]
@@ -119,9 +117,7 @@ class PipelineExecutionLogger:
     ) -> None:
         steps_json = json.dumps(steps, default=str).replace("'", "''")
         end_clause = ", PIPELINE_END_TIME = CURRENT_TIMESTAMP()" if mark_end else ""
-        status_clause = (
-            f", PIPELINE_STATUS = '{pipeline_status}'" if pipeline_status else ""
-        )
+        status_clause = f", PIPELINE_STATUS = '{pipeline_status}'" if pipeline_status else ""
         self.session.sql(
             f"UPDATE {self.table} "
             f"SET TASK_STEPS = PARSE_JSON('{steps_json}'), "
@@ -192,13 +188,17 @@ class PipelineExecutionLogger:
             pipeline_status = "SUCCESS"
 
         self._write_steps(
-            run_id, steps,
+            run_id,
+            steps,
             pipeline_status=pipeline_status,
             mark_end=is_final or status == "failed",
         )
         logger.info(
             "Logged task end: %s status=%s duration=%.1fs (run_id=%s)",
-            task_key, status, duration, run_id,
+            task_key,
+            status,
+            duration,
+            run_id,
         )
 
     def log_task_skipped(self, task_key: str, task_name: str, reason: str = "") -> str:

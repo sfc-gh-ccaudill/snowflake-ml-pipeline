@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["I", "E401"]
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true

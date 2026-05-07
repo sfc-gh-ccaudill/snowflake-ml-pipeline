@@ -13,15 +13,15 @@ responsible for initialising the Ray cluster (rank-0 = head node,
 rank > 0 = worker nodes) and calling tune.Tuner(...).fit().
 """
 
+from dataclasses import dataclass, field
 import json
 import logging
 import os
 import sys
 import tempfile
 import time
-import zipfile
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+import zipfile
 
 from snowflake.snowpark import Session
 
@@ -57,9 +57,9 @@ _JOB_POLL_INTERVAL_SECS = 15
 _JOB_TIMEOUT_SECS = 3600
 
 _RAY_PACKAGES: Dict[str, List[str]] = {
-    "random":   ["ray[tune]"],
+    "random": ["ray[tune]"],
     "hyperopt": ["ray[tune]", "hyperopt"],
-    "optuna":   ["ray[tune]", "optuna"],
+    "optuna": ["ray[tune]", "optuna"],
 }
 
 
@@ -122,8 +122,7 @@ class RayHPOConfig:
             raise ValueError(f"mode must be 'min' or 'max', got {self.mode!r}")
         if self.search_alg not in _RAY_PACKAGES:
             raise ValueError(
-                f"search_alg must be one of {list(_RAY_PACKAGES)}, "
-                f"got {self.search_alg!r}"
+                f"search_alg must be one of {list(_RAY_PACKAGES)}, got {self.search_alg!r}"
             )
 
     def to_env_vars(self) -> Dict[str, str]:
@@ -390,8 +389,7 @@ class RemoteTrainer:
             elapsed = time.time() - start
             if elapsed > timeout_secs:
                 raise TimeoutError(
-                    f"Job {job.id} did not complete within {timeout_secs}s. "
-                    f"Last status: {status}"
+                    f"Job {job.id} did not complete within {timeout_secs}s. Last status: {status}"
                 )
 
             time.sleep(_JOB_POLL_INTERVAL_SECS)

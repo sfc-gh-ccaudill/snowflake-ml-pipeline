@@ -9,8 +9,8 @@ predict() helper to validate the endpoint post-deployment.
 import json
 import logging
 import os
-import time
 from pathlib import Path
+import time
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
@@ -19,6 +19,7 @@ from snowflake.snowpark import Session
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 except ImportError:
     pass
@@ -122,7 +123,12 @@ class ModelDeployer:
 
         logger.info(
             "Deploying %s/%s as service '%s' on pool '%s' (min=%d max=%d)",
-            model_name, version_name, service_name, compute_pool, min_instances, max_instances,
+            model_name,
+            version_name,
+            service_name,
+            compute_pool,
+            min_instances,
+            max_instances,
         )
 
         model = self.registry.get_model(model_name)
@@ -135,7 +141,7 @@ class ModelDeployer:
             min_instances=min_instances,
             max_instances=max_instances,
             autocapture=True,
-            ingress_enabled=True
+            ingress_enabled=True,
         )
         if gpu_requests:
             kwargs["gpu_requests"] = gpu_requests
@@ -156,9 +162,7 @@ class ModelDeployer:
         last_status = None
 
         while True:
-            rows = self.session.sql(
-                f"SHOW SERVICES LIKE '{service_name}'"
-            ).collect()
+            rows = self.session.sql(f"SHOW SERVICES LIKE '{service_name}'").collect()
 
             status = None
             for row in rows:
@@ -176,15 +180,12 @@ class ModelDeployer:
                 return
 
             if status in ("FAILED", "DELETING", "DELETED"):
-                raise RuntimeError(
-                    f"Service '{service_name}' reached terminal state: {status}"
-                )
+                raise RuntimeError(f"Service '{service_name}' reached terminal state: {status}")
 
             elapsed = time.time() - start
             if elapsed > timeout_secs:
                 raise TimeoutError(
-                    f"Service '{service_name}' did not reach RUNNING within "
-                    f"{timeout_secs}s. Last status: {status}"
+                    f"Service '{service_name}' did not reach RUNNING within {timeout_secs}s. Last status: {status}"
                 )
 
             time.sleep(_SERVICE_POLL_INTERVAL_SECS)
@@ -244,26 +245,24 @@ class ModelDeployer:
         ).collect()
         logger.info("Default version updated: %s/%s", model_name, version_name)
 
-    def configure_compute_pool_auto_suspend(self, compute_pool: str, auto_suspend_secs: int) -> None:
+    def configure_compute_pool_auto_suspend(
+        self, compute_pool: str, auto_suspend_secs: int
+    ) -> None:
         """Set the auto-suspend timeout on a compute pool."""
         logger.info(
             "Setting AUTO_SUSPEND_SECS = %d on compute pool '%s'",
-            auto_suspend_secs, compute_pool,
+            auto_suspend_secs,
+            compute_pool,
         )
         self.session.sql(
             f"ALTER COMPUTE POOL {compute_pool} SET AUTO_SUSPEND_SECS = {auto_suspend_secs}"
         ).collect()
-        self.session.sql(
-            f"ALTER COMPUTE POOL {compute_pool} SET AUTO_RESUME = TRUE"
-        ).collect()
+        self.session.sql(f"ALTER COMPUTE POOL {compute_pool} SET AUTO_RESUME = TRUE").collect()
 
     def service_exists(self, service_name: str) -> bool:
         """Return True if a service with the given name currently exists."""
         rows = self.session.sql(f"SHOW SERVICES LIKE '{service_name}'").collect()
-        return any(
-            row.as_dict().get("name", "").upper() == service_name.upper()
-            for row in rows
-        )
+        return any(row.as_dict().get("name", "").upper() == service_name.upper() for row in rows)
 
     def get_service_status(self, service_name: str) -> Optional[str]:
         """Return the current status of a deployed service, or None if it does not exist."""
@@ -296,7 +295,6 @@ class ModelDeployer:
         endpoint_path: str = "/predict",
         endpoint_timeout_secs: int = 120,
     ) -> str:
-    
         # == If we've already identified the URL, return it ==
         if self._endpoint_url:
             return self._endpoint_url
@@ -305,9 +303,7 @@ class ModelDeployer:
 
         start = time.time()
         while True:
-            rows = self.session.sql(
-                f"SHOW ENDPOINTS IN SERVICE {service_name}"
-            ).collect()
+            rows = self.session.sql(f"SHOW ENDPOINTS IN SERVICE {service_name}").collect()
 
             for row in rows:
                 row_dict = row.as_dict()
@@ -321,13 +317,13 @@ class ModelDeployer:
             elapsed = time.time() - start
             if elapsed > endpoint_timeout_secs:
                 raise TimeoutError(
-                    f"No ingress endpoint found for '{service_name}' within "
-                    f"{endpoint_timeout_secs}s"
+                    f"No ingress endpoint found for '{service_name}' within {endpoint_timeout_secs}s"
                 )
 
             logger.info(
                 "No endpoint yet for '%s' — retrying in 5s (%.0fs elapsed)",
-                service_name, elapsed,
+                service_name,
+                elapsed,
             )
             time.sleep(5)
 
@@ -336,17 +332,15 @@ class ModelDeployer:
         service_name: str,
         features_df: pd.DataFrame,
         endpoint_path: str = "/predict",
-        token:str = None
+        token: str = None,
     ) -> Dict[str, Any]:
-        
         url = self.get_endpoint_url(service_name, endpoint_path=endpoint_path)
-        
+
         # == Get Auth Token ==
         auth_token = os.environ.get("SNOWFLAKE_TOKEN")
         if auth_token is None:
             logger.warning("== No Auth Token Found. ==")
             auth_token = token
-
 
         payload = json.loads(features_df.to_json(orient="records"))
 
@@ -373,4 +367,3 @@ class ModelDeployer:
         logger.info("Dropping service '%s'", service_name)
         self.session.sql(f"DROP SERVICE IF EXISTS {service_name}").collect()
         logger.info("Service '%s' dropped", service_name)
-

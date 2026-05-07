@@ -31,7 +31,9 @@ logger = logging.getLogger(__name__)
 _CATEGORICAL_COMPUTED = {"BMI_CATEGORY"}
 
 
-def _create_inference_logs_view(session: Session, config, db: str, schema: str, model_name: str) -> str:
+def _create_inference_logs_view(
+    session: Session, config, db: str, schema: str, model_name: str
+) -> str:
     """
     Create (or replace) a flat view over INFERENCE_TABLE that exposes all
     request features and the predicted class as typed columns.
@@ -52,10 +54,7 @@ def _create_inference_logs_view(session: Session, config, db: str, schema: str, 
     col_exprs = (
         [_numeric_col(c) for c in raw_numeric]
         + [_varchar_col(c) for c in categorical]
-        + [
-            _varchar_col(c) if c in _CATEGORICAL_COMPUTED else _numeric_col(c)
-            for c in computed
-        ]
+        + [_varchar_col(c) if c in _CATEGORICAL_COMPUTED else _numeric_col(c) for c in computed]
         + [
             'RECORD_ATTRIBUTES:"snow.model_serving.response.data.output_feature_0"::VARCHAR AS RISK_LEVEL'
         ]
@@ -177,8 +176,11 @@ def run(config, session: Session, version_name: str = None) -> dict:
     alert_name = None
     if getattr(config.monitor, "drift_alert_enabled", False):
         alert_name = config.monitor.drift_alert_name
-        logger.info("Setting up drift alert '%s' to retrain on drift > %s",
-                     alert_name, config.monitor.drift_threshold)
+        logger.info(
+            "Setting up drift alert '%s' to retrain on drift > %s",
+            alert_name,
+            config.monitor.drift_threshold,
+        )
         monitor.setup_drift_alert(
             alert_name=alert_name,
             monitor_name=monitor_name,
@@ -189,8 +191,12 @@ def run(config, session: Session, version_name: str = None) -> dict:
             warehouse=warehouse,
             retrain_root_task=config.monitor.retrain_root_task,
         )
-        logger.info("Drift alert active — will EXECUTE TASK %s.%s.%s on drift",
-                     db, schema, config.monitor.retrain_root_task)
+        logger.info(
+            "Drift alert active — will EXECUTE TASK %s.%s.%s on drift",
+            db,
+            schema,
+            config.monitor.retrain_root_task,
+        )
 
     logger.info("=== Step 5 complete — model monitoring active ===")
 

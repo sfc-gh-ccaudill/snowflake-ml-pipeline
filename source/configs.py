@@ -3,8 +3,8 @@ Configuration dataclasses for Healthcare ML Pipeline.
 """
 
 import dataclasses
-import os
 from dataclasses import dataclass, field
+import os
 from typing import Any, Dict, List
 
 import yaml
@@ -41,9 +41,9 @@ class SnowflakeConfig(BaseConfig):
     def to_dict(self) -> dict:
         return {
             "connection_name": self.connection_name,
-            "database":        self.database,
-            "schema":          self.schema_name,
-            "warehouse":       self.warehouse,
+            "database": self.database,
+            "schema": self.schema_name,
+            "warehouse": self.warehouse,
         }
 
 
@@ -79,9 +79,9 @@ class ModelConfig(BaseConfig):
 
     def to_dict(self) -> dict:
         return {
-            "model_name":       self.model_name,
+            "model_name": self.model_name,
             "target_platforms": self.target_platforms,
-            "params":           self.params.to_dict(),
+            "params": self.params.to_dict(),
         }
 
 
@@ -202,18 +202,18 @@ class PipelineConfig(BaseConfig):
 
     def to_dict(self) -> dict:
         return {
-            "snowflake":     self.snowflake.to_dict(),
-            "compute":       self.compute.to_dict(),
-            "model":         self.model.to_dict(),
-            "tables":        self.tables.to_dict(),
-            "features":      self.features.to_dict(),
+            "snowflake": self.snowflake.to_dict(),
+            "compute": self.compute.to_dict(),
+            "model": self.model.to_dict(),
+            "tables": self.tables.to_dict(),
+            "features": self.features.to_dict(),
             "feature_store": self.feature_store.to_dict(),
-            "deploy":        self.deploy.to_dict(),
-            "stages":        self.stages.to_dict(),
-            "evaluation":    self.evaluation.to_dict(),
-            "train":         self.train.to_dict(),
-            "tune":          self.tune.to_dict(),
-            "monitor":       self.monitor.to_dict(),
+            "deploy": self.deploy.to_dict(),
+            "stages": self.stages.to_dict(),
+            "evaluation": self.evaluation.to_dict(),
+            "train": self.train.to_dict(),
+            "tune": self.tune.to_dict(),
+            "monitor": self.monitor.to_dict(),
         }
 
 

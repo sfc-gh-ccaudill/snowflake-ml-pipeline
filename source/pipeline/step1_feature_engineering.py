@@ -13,13 +13,13 @@ Run standalone:
     python -m source.pipeline.step1_feature_engineering
 """
 
+from datetime import datetime, timezone
 import logging
 import os
 import sys
-from datetime import datetime, timezone
 
-import snowflake.snowpark.functions as F
 from snowflake.snowpark import Session
+import snowflake.snowpark.functions as F
 
 from source.framework.feature_store import FeatureStoreManager
 from source.pipeline.pipeline_utils import PipelineState
@@ -39,29 +39,40 @@ def _build_feature_dataframe(session: Session, raw_table: str):
     """
     df = session.table(raw_table)
 
-    df = df.with_column(
-        "SHOCK_INDEX",
-        F.col("HEART_RATE") / F.col("SYSTOLIC_BP"),
-    ).with_column(
-        "PULSE_PRESSURE",
-        F.col("SYSTOLIC_BP") - F.col("DIASTOLIC_BP"),
-    ).with_column(
-        "BMI_CATEGORY",
-        F.when(F.col("BMI") < 18.5, F.lit("UNDERWEIGHT"))
-         .when(F.col("BMI") < 25.0, F.lit("NORMAL"))
-         .when(F.col("BMI") < 30.0, F.lit("OVERWEIGHT"))
-         .otherwise(F.lit("OBESE")),
-    ).with_column(
-        "VITAL_SIGNS_SEVERITY",
-        (
-            F.when((F.col("HEART_RATE") > 100) | (F.col("HEART_RATE") < 50), F.lit(1)).otherwise(F.lit(0))
-            + F.when((F.col("SYSTOLIC_BP") > 180) | (F.col("SYSTOLIC_BP") < 90), F.lit(2)).otherwise(F.lit(0))
-            + F.when(F.col("OXYGEN_SATURATION") < 92, F.lit(2)).otherwise(
-                F.when(F.col("OXYGEN_SATURATION") < 95, F.lit(1)).otherwise(F.lit(0))
-            )
-            + F.when(F.col("RESPIRATORY_RATE") > 24, F.lit(1)).otherwise(F.lit(0))
-            + F.when((F.col("TEMPERATURE") > 38.5) | (F.col("TEMPERATURE") < 36.0), F.lit(1)).otherwise(F.lit(0))
-        ),
+    df = (
+        df.with_column(
+            "SHOCK_INDEX",
+            F.col("HEART_RATE") / F.col("SYSTOLIC_BP"),
+        )
+        .with_column(
+            "PULSE_PRESSURE",
+            F.col("SYSTOLIC_BP") - F.col("DIASTOLIC_BP"),
+        )
+        .with_column(
+            "BMI_CATEGORY",
+            F.when(F.col("BMI") < 18.5, F.lit("UNDERWEIGHT"))
+            .when(F.col("BMI") < 25.0, F.lit("NORMAL"))
+            .when(F.col("BMI") < 30.0, F.lit("OVERWEIGHT"))
+            .otherwise(F.lit("OBESE")),
+        )
+        .with_column(
+            "VITAL_SIGNS_SEVERITY",
+            (
+                F.when(
+                    (F.col("HEART_RATE") > 100) | (F.col("HEART_RATE") < 50), F.lit(1)
+                ).otherwise(F.lit(0))
+                + F.when(
+                    (F.col("SYSTOLIC_BP") > 180) | (F.col("SYSTOLIC_BP") < 90), F.lit(2)
+                ).otherwise(F.lit(0))
+                + F.when(F.col("OXYGEN_SATURATION") < 92, F.lit(2)).otherwise(
+                    F.when(F.col("OXYGEN_SATURATION") < 95, F.lit(1)).otherwise(F.lit(0))
+                )
+                + F.when(F.col("RESPIRATORY_RATE") > 24, F.lit(1)).otherwise(F.lit(0))
+                + F.when(
+                    (F.col("TEMPERATURE") > 38.5) | (F.col("TEMPERATURE") < 36.0), F.lit(1)
+                ).otherwise(F.lit(0))
+            ),
+        )
     )
 
     return df
@@ -120,8 +131,7 @@ def run(config, session: Session) -> dict:
         timestamp_column="TIMESTAMP",
         refresh_freq=feature_view_refresh_freq,
         description=(
-            "Raw vitals + 4 engineered features: "
-            "SHOCK_INDEX, PULSE_PRESSURE, BMI_CATEGORY, VITAL_SIGNS_SEVERITY"
+            "Raw vitals + 4 engineered features: SHOCK_INDEX, PULSE_PRESSURE, BMI_CATEGORY, VITAL_SIGNS_SEVERITY"
         ),
     )
 

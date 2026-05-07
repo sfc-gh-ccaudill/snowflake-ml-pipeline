@@ -70,9 +70,9 @@ def run(config, session: Session) -> dict:
         entrypoint="train.py",
         num_instances=num_instances,
         env_vars={
-            "ML_PIPELINE_CONFIG":        json.dumps(config_to_dict(config)),
-            "TRAINING_DATASET_NAME":     dataset_name,
-            "TRAINING_DATASET_VERSION":  dataset_version or "",
+            "ML_PIPELINE_CONFIG": json.dumps(config_to_dict(config)),
+            "TRAINING_DATASET_NAME": dataset_name,
+            "TRAINING_DATASET_VERSION": dataset_version or "",
         },
     )
 
