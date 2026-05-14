@@ -111,16 +111,50 @@ class DeployConfig(BaseConfig):
 
 
 @dataclass
+class DriftAlertConfig(BaseConfig):
+    alert_name: str = "PREDICTION_DRIFT_ALERT"
+    column: str = "RISK_LEVEL"
+    drift_metric: str = "POPULATION_STABILITY_INDEX"
+    drift_threshold: float = 0.25
+    schedule: str = "USING CRON 0 6 * * * America/Los_Angeles"
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DriftAlertConfig":
+        valid = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in valid})
+
+
+@dataclass
 class MonitorConfig(BaseConfig):
     monitor_name: str = "PATIENT_RISK_MONITOR"
     inference_logs_view: str = "INFERENCE_LOGS_VIEW"
     baseline_table: str = "MONITOR_BASELINE"
-    drift_alert_name: str = "PATIENT_RISK_DRIFT_ALERT"
     drift_alert_enabled: bool = True
-    drift_metric: str = "POPULATION_STABILITY_INDEX"
-    drift_threshold: float = 0.25
-    drift_alert_schedule: str = "USING CRON 0 6 * * * America/Los_Angeles"
     retrain_root_task: str = "PIPELINE_FEATURE_ENG_TASK"
+    drift_alerts: List[DriftAlertConfig] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "MonitorConfig":
+        alerts_raw = d.get("drift_alerts", [])
+        alerts = [DriftAlertConfig.from_dict(a) for a in alerts_raw]
+        return cls(
+            monitor_name=d.get("monitor_name", "PATIENT_RISK_MONITOR"),
+            inference_logs_view=d.get("inference_logs_view", "INFERENCE_LOGS_VIEW"),
+            baseline_table=d.get("baseline_table", "MONITOR_BASELINE"),
+            drift_alert_enabled=d.get("drift_alert_enabled", True),
+            retrain_root_task=d.get("retrain_root_task", "PIPELINE_FEATURE_ENG_TASK"),
+            drift_alerts=alerts,
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "monitor_name": self.monitor_name,
+            "inference_logs_view": self.inference_logs_view,
+            "baseline_table": self.baseline_table,
+            "drift_alert_enabled": self.drift_alert_enabled,
+            "retrain_root_task": self.retrain_root_task,
+            "drift_alerts": [a.to_dict() for a in self.drift_alerts],
+        }
 
 
 @dataclass

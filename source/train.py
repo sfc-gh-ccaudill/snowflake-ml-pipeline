@@ -117,7 +117,7 @@ class PatientRiskTraining:
             self.log_experiment(model_name, metrics, model_params)
 
         if register_model:
-            self.register_model(model, model_name, X_train, metrics, target_platforms)
+            self.register_model(model, model_name, X_train, metrics, target_platforms, model_params)
 
         return metrics
 
@@ -143,7 +143,9 @@ class PatientRiskTraining:
             )
         logger.info("Logged run '%s' to experiment %s", run_name, experiment_name)
 
-    def register_model(self, model, model_name, train_data, metrics, target_platforms):
+    def register_model(
+        self, model, model_name, train_data, metrics, target_platforms, model_params=None
+    ):
         logger.info("Registering model: %s", model_name)
         registry = Registry(
             self.session,
@@ -154,13 +156,17 @@ class PatientRiskTraining:
         for col in sample_data.select_dtypes(include=["object"]).columns:
             sample_data[col] = sample_data[col].fillna("Unknown")
 
+        all_metrics = {**metrics}
+        if model_params:
+            all_metrics["training_params"] = model_params
+
         model_version = f"v_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         registry.log_model(
             model=model,
             model_name=model_name,
             version_name=model_version,
             sample_input_data=sample_data,
-            metrics=metrics,
+            metrics=all_metrics,
             task=Task.TABULAR_MULTI_CLASSIFICATION,
             target_platforms=target_platforms,
             options={"enable_explainability": True},

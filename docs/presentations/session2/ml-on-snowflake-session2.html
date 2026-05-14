@@ -1,0 +1,2470 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ML on Snowflake — Session 2: Feature Store, Experiments & Model Registry</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --sf-blue: #29B5E8;
+      --sf-blue-light: #56C4EC;
+      --sf-blue-dark: #1A8BB8;
+      --sf-navy: #091E33;
+      --sf-navy-mid: #0D2B45;
+      --sf-navy-light: #11567F;
+      --sf-white: #FFFFFF;
+      --sf-gray-100: #F8FAFC;
+      --sf-gray-200: #E2E8F0;
+      --sf-gray-600: #475569;
+      --sf-green: #10B981;
+      --sf-purple: #8B5CF6;
+      --sf-orange: #F59E0B;
+      --sf-red: #EF4444;
+      --sf-pink: #EC4899;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--sf-navy);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    .deck {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: safe center;
+      padding: 50px 80px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1), transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+      transform: scale(0.97) translateY(10px);
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
+    .slide::after {
+      content: '\00A9 2026 Snowflake Inc. All Rights Reserved';
+      position: absolute;
+      bottom: 20px;
+      left: 80px;
+      font-size: 0.68em;
+      color: rgba(255, 255, 255, 0.2);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      pointer-events: none;
+    }
+
+    .slide.active {
+      opacity: 1;
+      pointer-events: all;
+      transform: scale(1) translateY(0);
+    }
+
+    .progress {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--sf-blue), var(--sf-purple));
+      z-index: 999;
+      transition: width 0.5s ease;
+      border-radius: 0 2px 2px 0;
+    }
+
+    .slide-num {
+      position: fixed;
+      bottom: 28px;
+      right: 40px;
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.35);
+      z-index: 999;
+      letter-spacing: 1px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .nav-hint {
+      position: fixed;
+      bottom: 28px;
+      left: 40px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.25);
+      z-index: 999;
+      letter-spacing: 0.5px;
+    }
+
+    .slide-hero {
+      background:
+        radial-gradient(ellipse 120% 80% at 20% 80%, rgba(41, 181, 232, 0.15) 0%, transparent 60%),
+        radial-gradient(ellipse 100% 60% at 80% 20%, rgba(139, 92, 246, 0.12) 0%, transparent 50%),
+        radial-gradient(ellipse 80% 80% at 50% 50%, rgba(41, 181, 232, 0.05) 0%, transparent 70%),
+        var(--sf-navy);
+      align-items: center;
+      text-align: center;
+      color: white;
+      overflow: hidden;
+    }
+
+    .slide-hero .hero-grid {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(41, 181, 232, 0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(41, 181, 232, 0.06) 1px, transparent 1px);
+      background-size: 60px 60px;
+      mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, black 20%, transparent 70%);
+      -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, black 20%, transparent 70%);
+      -webkit-transform: translateZ(0);
+      transform: translateZ(0);
+    }
+
+    .slide-hero .floating-shapes {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    .slide-hero .floating-shapes .shape {
+      position: absolute;
+      border-radius: 50%;
+      opacity: 0.08;
+      animation: float 20s ease-in-out infinite;
+    }
+
+    .slide-hero .floating-shapes .shape:nth-child(1) {
+      width: 400px;
+      height: 400px;
+      background: var(--sf-blue);
+      top: -100px;
+      right: -100px;
+      animation-delay: 0s;
+    }
+
+    .slide-hero .floating-shapes .shape:nth-child(2) {
+      width: 300px;
+      height: 300px;
+      background: var(--sf-purple);
+      bottom: -80px;
+      left: -80px;
+      animation-delay: -7s;
+    }
+
+    .slide-hero .floating-shapes .shape:nth-child(3) {
+      width: 200px;
+      height: 200px;
+      background: var(--sf-blue-light);
+      top: 30%;
+      left: 10%;
+      animation-delay: -14s;
+    }
+
+    .slide-hero .floating-shapes .shape:nth-child(4) {
+      width: 150px;
+      height: 150px;
+      background: var(--sf-pink);
+      bottom: 20%;
+      right: 15%;
+      animation-delay: -3s;
+    }
+
+    @keyframes float {
+
+      0%,
+      100% {
+        transform: translate(0, 0) rotate(0deg);
+      }
+
+      33% {
+        transform: translate(20px, -30px) rotate(5deg);
+      }
+
+      66% {
+        transform: translate(-15px, 15px) rotate(-3deg);
+      }
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 2;
+    }
+
+    .hero-snowflake {
+      margin-bottom: 36px;
+    }
+
+    .hero-snowflake svg {
+      width: 64px;
+      height: 64px;
+      filter: drop-shadow(0 0 30px rgba(41, 181, 232, 0.4));
+    }
+
+    .slide-hero h1 {
+      font-size: 4.2em;
+      font-weight: 900;
+      letter-spacing: -2.5px;
+      line-height: 1.05;
+      margin-bottom: 20px;
+      color: #FFFFFF;
+    }
+
+    .slide-hero h2 {
+      font-size: 1.4em;
+      font-weight: 400;
+      color: rgba(255, 255, 255, 0.7);
+      letter-spacing: 0.3px;
+      margin-bottom: 12px;
+    }
+
+    .slide-hero .date-badge {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 8px 20px;
+      border-radius: 40px;
+      background: rgba(41, 181, 232, 0.12);
+      border: 1px solid rgba(41, 181, 232, 0.25);
+      font-size: 0.85em;
+      font-weight: 600;
+      color: var(--sf-blue-light);
+      letter-spacing: 1px;
+    }
+
+    .slide-dark {
+      background: var(--sf-navy);
+      color: white;
+    }
+
+    .slide-dark .slide-inner {
+      position: relative;
+      z-index: 1;
+    }
+
+    .slide-dark h2 {
+      font-size: 2.4em;
+      font-weight: 800;
+      letter-spacing: -1px;
+      line-height: 1.15;
+      margin-bottom: 10px;
+    }
+
+    .slide-dark h2 .accent {
+      color: var(--sf-blue);
+    }
+
+    .slide-dark h2 .accent-purple {
+      color: var(--sf-purple);
+    }
+
+    .slide-dark h2 .accent-green {
+      color: var(--sf-green);
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 14px;
+      border-radius: 6px;
+      font-size: 0.68em;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.8px;
+      margin-bottom: 16px;
+      background: rgba(41, 181, 232, 0.1);
+      color: var(--sf-blue);
+      border: 1px solid rgba(41, 181, 232, 0.15);
+    }
+
+    .subtitle {
+      font-size: 1.05em;
+      color: rgba(255, 255, 255, 0.55);
+      margin-bottom: 32px;
+      max-width: 700px;
+      line-height: 1.6;
+    }
+
+    .cards {
+      display: grid;
+      gap: 18px;
+    }
+
+    .cards.c2 {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .cards.c3 {
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+
+    .cards.c4 {
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+    }
+
+    .card {
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 16px;
+      padding: 26px 22px;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--sf-blue), var(--sf-purple));
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(41, 181, 232, 0.2);
+    }
+
+    .card:hover::before {
+      opacity: 1;
+    }
+
+    .card-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 14px;
+      font-size: 1.3em;
+    }
+
+    .card-icon.blue {
+      background: rgba(41, 181, 232, 0.12);
+    }
+
+    .card-icon.purple {
+      background: rgba(139, 92, 246, 0.12);
+    }
+
+    .card-icon.green {
+      background: rgba(16, 185, 129, 0.12);
+    }
+
+    .card-icon.orange {
+      background: rgba(245, 158, 11, 0.12);
+    }
+
+    .card-icon.pink {
+      background: rgba(236, 72, 153, 0.12);
+    }
+
+    .card h3 {
+      font-size: 0.92em;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: var(--sf-white);
+    }
+
+    .card p,
+    .card li {
+      font-size: 0.82em;
+      line-height: 1.6;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .card ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .card ul li {
+      padding: 3px 0 3px 16px;
+      position: relative;
+    }
+
+    .card ul li::before {
+      content: '\203A';
+      position: absolute;
+      left: 0;
+      color: var(--sf-blue);
+      font-weight: 700;
+    }
+
+    .slide-section {
+      background: var(--sf-navy);
+      color: white;
+      text-align: center;
+      align-items: center;
+    }
+
+    .slide-section::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 60% at 50% 50%, rgba(41, 181, 232, 0.08) 0%, transparent 70%);
+    }
+
+    .slide-section h2 {
+      font-size: 3em;
+      font-weight: 900;
+      letter-spacing: -1.5px;
+      line-height: 1.15;
+      position: relative;
+    }
+
+    .slide-section .section-sub {
+      font-size: 1.1em;
+      color: rgba(255, 255, 255, 0.5);
+      margin-top: 16px;
+      position: relative;
+    }
+
+    .ring-deco {
+      position: absolute;
+      border-radius: 50%;
+      border: 1px solid rgba(41, 181, 232, 0.1);
+      pointer-events: none;
+    }
+
+    .pdf-btn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 999;
+      padding: 8px 16px;
+      border-radius: 8px;
+      background: rgba(41, 181, 232, 0.15);
+      border: 1px solid rgba(41, 181, 232, 0.3);
+      color: var(--sf-blue);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      opacity: 0.6;
+    }
+
+    .pdf-btn:hover {
+      opacity: 1;
+      background: rgba(41, 181, 232, 0.25);
+    }
+
+    .lifecycle-diagram {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin: 28px 0;
+    }
+
+    .lc-node {
+      padding: 16px 20px;
+      border-radius: 12px;
+      text-align: center;
+      font-size: 0.8em;
+      font-weight: 600;
+      min-width: 120px;
+      position: relative;
+    }
+
+    .lc-node.n1 {
+      background: rgba(41, 181, 232, 0.15);
+      border: 1px solid rgba(41, 181, 232, 0.3);
+      color: var(--sf-blue-light);
+    }
+
+    .lc-node.n2 {
+      background: rgba(139, 92, 246, 0.15);
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      color: #A78BFA;
+    }
+
+    .lc-node.n3 {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #34D399;
+    }
+
+    .lc-node.n4 {
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: #FBBF24;
+    }
+
+    .lc-node.n5 {
+      background: rgba(236, 72, 153, 0.15);
+      border: 1px solid rgba(236, 72, 153, 0.3);
+      color: #F472B6;
+    }
+
+    .lc-node.n6 {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #FCA5A5;
+    }
+
+    .lc-arrow {
+      color: rgba(255, 255, 255, 0.2);
+      font-size: 1.1em;
+    }
+
+    .lc-arrow svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    @page {
+      size: landscape;
+      margin: 0;
+    }
+
+    @media print {
+      body {
+        overflow: visible !important;
+        background: var(--sf-navy) !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+      }
+
+      .deck {
+        height: auto !important;
+      }
+
+      .slide {
+        position: relative !important;
+        inset: auto !important;
+        opacity: 1 !important;
+        pointer-events: all !important;
+        transform: none !important;
+        page-break-after: always;
+        page-break-inside: avoid;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      .progress,
+      .slide-num,
+      .nav-hint,
+      .pdf-btn {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="progress" id="progress"></div>
+  <div class="slide-num" id="slideNum"></div>
+  <div class="nav-hint">&larr; &rarr; to navigate</div>
+  <button class="pdf-btn" onclick="window.print()">&#128196; Save as PDF</button>
+
+  <div class="deck">
+
+    <!-- ==================== SLIDE 1: HERO ==================== -->
+    <div class="slide slide-hero active">
+      <div class="hero-grid"></div>
+      <div class="floating-shapes">
+        <div class="shape"></div>
+        <div class="shape"></div>
+        <div class="shape"></div>
+        <div class="shape"></div>
+      </div>
+      <div class="hero-content">
+        <div class="hero-snowflake">
+          <svg viewBox="0 0 80 80" fill="none">
+            <path d="M40 8v64M40 8l-8 8M40 8l8 8M40 72l-8-8M40 72l8-8" stroke="url(#g1)" stroke-width="2.5"
+              stroke-linecap="round" />
+            <path d="M12.3 24l55.4 32M12.3 24l2 11M12.3 24l11-2M67.7 56l-2-11M67.7 56l-11 2" stroke="url(#g1)"
+              stroke-width="2.5" stroke-linecap="round" />
+            <path d="M67.7 24L12.3 56M67.7 24l-11-2M67.7 24l-2 11M12.3 56l11 2M12.3 56l2-11" stroke="url(#g1)"
+              stroke-width="2.5" stroke-linecap="round" />
+            <circle cx="40" cy="40" r="5" fill="url(#g1)" />
+            <defs>
+              <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#29B5E8" />
+                <stop offset="100%" stop-color="#8B5CF6" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <h1>Feature Store, Experiments<br>&amp; Model Registry</h1>
+        <h2>Session 2 &mdash; Deep Dive into Production ML on Snowflake</h2>
+        <span class="date-badge">MAY 2026 &middot; SESSION 2</span>
+      </div>
+      <div class="ring-deco"
+        style="width:600px;height:600px;top:-150px;right:-200px;border-color:rgba(139,92,246,0.08);"></div>
+      <div class="ring-deco"
+        style="width:400px;height:400px;bottom:-100px;left:-100px;border-color:rgba(41,181,232,0.08);"></div>
+    </div>
+
+    <!-- ==================== SLIDE 1B: ABOUT ME ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:60px;align-items:center;">
+          <div style="text-align:center;">
+            <div
+              style="width:180px;height:180px;border-radius:50%;margin:0 auto 24px;background:linear-gradient(135deg,rgba(41,181,232,0.15),rgba(139,92,246,0.15));border:3px solid rgba(41,181,232,0.3);display:flex;align-items:center;justify-content:center;font-size:4em;color:rgba(255,255,255,0.2);overflow:hidden;position:relative;">
+              <img src="../../assets/profile.png" alt="Chris Caudill"
+                style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
+            </div>
+            <h2 style="font-size:1.6em;font-weight:800;color:white;margin-bottom:6px;">Chris Caudill</h2>
+            <div style="font-size:0.95em;color:var(--sf-blue);font-weight:600;">Senior AI/ML Architect</div>
+            <div style="font-size:0.82em;color:rgba(255,255,255,0.45);margin-top:4px;">Snowflake</div>
+          </div>
+
+          <div style="position:relative;padding-left:32px;">
+            <div
+              style="position:absolute;left:10px;top:10px;bottom:10px;width:2px;background:linear-gradient(180deg,var(--sf-blue),var(--sf-purple),rgba(255,255,255,0.1));border-radius:2px;">
+            </div>
+
+            <div style="position:relative;margin-bottom:36px;">
+              <div
+                style="position:absolute;left:-27px;top:4px;width:14px;height:14px;border-radius:50%;background:var(--sf-blue);border:3px solid #091E33;filter:drop-shadow(0 0 6px rgba(41,181,232,0.4));-webkit-transform:translateZ(0);transform:translateZ(0);">
+              </div>
+              <div
+                style="font-size:0.62em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-blue);margin-bottom:4px;">
+                Present</div>
+              <div style="font-size:1.15em;font-weight:700;color:white;">Senior AI/ML Architect</div>
+              <div style="font-size:0.9em;color:rgba(255,255,255,0.6);margin-top:2px;">Snowflake</div>
+              <div style="font-size:0.78em;color:rgba(255,255,255,0.35);margin-top:6px;line-height:1.5;">End-to-end ML
+                platform strategy, customer architecture, production ML enablement.</div>
+            </div>
+
+            <div style="position:relative;margin-bottom:36px;">
+              <div
+                style="position:absolute;left:-27px;top:4px;width:14px;height:14px;border-radius:50%;background:var(--sf-purple);border:3px solid #091E33;">
+              </div>
+              <div
+                style="font-size:0.62em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#A78BFA;margin-bottom:4px;">
+                5 Years</div>
+              <div style="font-size:1.15em;font-weight:700;color:white;">Senior ML Engineer</div>
+              <div style="font-size:0.9em;color:rgba(255,255,255,0.6);margin-top:2px;">Amazon Web Services (AWS)</div>
+              <div style="font-size:0.78em;color:rgba(255,255,255,0.35);margin-top:6px;line-height:1.5;">
+                Enterprise-scale MLOps, Fuels Price Optimization, Agentic Systems.</div>
+            </div>
+
+            <div style="position:relative;">
+              <div
+                style="position:absolute;left:-27px;top:4px;width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,0.2);border:3px solid #091E33;">
+              </div>
+              <div
+                style="font-size:0.62em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:rgba(255,255,255,0.4);margin-bottom:4px;">
+                10 Years</div>
+              <div style="font-size:1.15em;font-weight:700;color:white;">Senior Data Scientist</div>
+              <div style="font-size:0.9em;color:rgba(255,255,255,0.6);margin-top:2px;">ExxonMobil</div>
+              <div style="font-size:0.78em;color:rgba(255,255,255,0.35);margin-top:6px;line-height:1.5;">Investigative
+                NLP, Market Signal Detection, Summarization Modeling.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE: SESSION SERIES ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128218; Series</span>
+        <h2>Session Series:<br><span class="accent">Machine Learning</span> on Snowflake</h2>
+        <p class="subtitle">A 4-part deep dive into production ML capabilities on Snowflake.</p>
+
+        <div style="position:relative;margin-top:24px;padding-top:40px;">
+          <div
+            style="position:absolute;top:52px;left:5%;right:5%;height:4px;border-radius:2px;background:linear-gradient(90deg, var(--sf-blue), var(--sf-purple), var(--sf-orange), var(--sf-green));">
+          </div>
+
+          <div
+            style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;position:relative;-webkit-transform:translateZ(0);transform:translateZ(0);">
+            <div style="text-align:center;display:flex;flex-direction:column;">
+              <div
+                style="width:18px;height:18px;border-radius:50%;background:var(--sf-blue);border:4px solid #091E33;margin:3px auto 19px;position:relative;z-index:2;">
+              </div>
+              <div
+                style="padding:18px 14px;border-radius:12px;background:rgba(41,181,232,0.05);border:1px solid rgba(41,181,232,0.2);flex:1;">
+                <div
+                  style="font-size:0.6em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-blue);margin-bottom:6px;">
+                  Session 1 &middot; Complete</div>
+                <div style="font-size:0.92em;font-weight:700;color:rgba(255,255,255,0.8);margin-bottom:6px;">End-to-End
+                  ML Overview
+                </div>
+                <div style="font-size:0.75em;color:rgba(255,255,255,0.4);line-height:1.5;">Platform overview,
+                  production-grade ML, live demo.</div>
+              </div>
+            </div>
+            <div style="text-align:center;display:flex;flex-direction:column;">
+              <div
+                style="width:24px;height:24px;border-radius:50%;background:var(--sf-purple);border:4px solid #091E33;filter:drop-shadow(0 0 8px rgba(139,92,246,0.5));margin:0 auto 16px;position:relative;z-index:2;-webkit-transform:translateZ(0);transform:translateZ(0);">
+              </div>
+              <div
+                style="padding:18px 14px;border-radius:12px;background:rgba(139,92,246,0.1);border:2px solid rgba(139,92,246,0.4);flex:1;">
+                <div
+                  style="font-size:0.6em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#A78BFA;margin-bottom:6px;">
+                  Session 2 &middot; Now</div>
+                <div style="font-size:0.92em;font-weight:700;color:white;margin-bottom:6px;">Feature Store, Experiments
+                  &amp; Registry</div>
+                <div style="font-size:0.75em;color:rgba(255,255,255,0.55);line-height:1.5;">Entities, FeatureViews,
+                  point-in-time correctness, experiment tracking, model registry.</div>
+              </div>
+            </div>
+            <div style="text-align:center;display:flex;flex-direction:column;">
+              <div
+                style="width:18px;height:18px;border-radius:50%;background:var(--sf-orange);border:4px solid #091E33;margin:3px auto 19px;position:relative;z-index:2;">
+              </div>
+              <div
+                style="padding:18px 14px;border-radius:12px;background:rgba(245,158,11,0.05);border:1px solid rgba(245,158,11,0.15);flex:1;">
+                <div
+                  style="font-size:0.6em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#FBBF24;margin-bottom:6px;">
+                  Session 3</div>
+                <div style="font-size:0.92em;font-weight:700;color:rgba(255,255,255,0.8);margin-bottom:6px;">Training,
+                  HPO &amp; Model Registry</div>
+                <div style="font-size:0.75em;color:rgba(255,255,255,0.4);line-height:1.5;">Distributed training, HPO,
+                  registry RBAC.</div>
+              </div>
+            </div>
+            <div style="text-align:center;display:flex;flex-direction:column;">
+              <div
+                style="width:18px;height:18px;border-radius:50%;background:var(--sf-green);border:4px solid #091E33;margin:3px auto 19px;position:relative;z-index:2;">
+              </div>
+              <div
+                style="padding:18px 14px;border-radius:12px;background:rgba(16,185,129,0.05);border:1px solid rgba(16,185,129,0.15);flex:1;">
+                <div
+                  style="font-size:0.6em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#34D399;margin-bottom:6px;">
+                  Session 4</div>
+                <div style="font-size:0.92em;font-weight:700;color:rgba(255,255,255,0.8);margin-bottom:6px;">Deployment,
+                  Monitoring &amp; MLOps</div>
+                <div style="font-size:0.75em;color:rgba(255,255,255,0.4);line-height:1.5;">Model Serving, Observability,
+                  CI/CD.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE 2: AGENDA ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128203; Agenda</span>
+        <h2>Today&rsquo;s <span class="accent">Agenda</span></h2>
+        <p class="subtitle">Three pillars of production ML management &mdash; all native to Snowflake.</p>
+        <div class="cards c3" style="margin-top:20px;">
+          <div class="card">
+            <div class="card-icon blue">&#129516;</div>
+            <h3>Part 1 &mdash; Feature Store</h3>
+            <ul>
+              <li>Feature engineering with Snowpark</li>
+              <li>Online &amp; offline stores</li>
+              <li>Point-in-time correctness</li>
+              <li>Automated refresh via Dynamic Tables</li>
+              <li>Dataset versioning</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-icon purple">&#128300;</div>
+            <h3>Part 2 &mdash; Experiment Tracking</h3>
+            <ul>
+              <li>Load versioned datasets</li>
+              <li>Establish a baseline run</li>
+              <li>Vary hyperparameters</li>
+              <li>Compare metrics side-by-side</li>
+              <li>Select the best run</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-icon green">&#128230;</div>
+            <h3>Part 3 &mdash; Model Registry</h3>
+            <ul>
+              <li>Register &amp; version models</li>
+              <li>End-to-end lineage</li>
+              <li>Aliases &amp; default version</li>
+              <li>Tagging &amp; metadata</li>
+              <li>Promotion workflow</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE: ML LIFECYCLE ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128260; Lifecycle</span>
+        <h2>The Standard <span class="accent">Machine Learning Lifecycle</span></h2>
+        <div class="lifecycle-diagram">
+          <div class="lc-node n1">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="margin-bottom:4px;display:block;margin:0 auto 6px;">
+              <path d="M4 7v10c0 1 1 2 2 2h12c1 0 2-1 2-2V7M4 7l8-4 8 4M4 7l8 4 8-4" />
+            </svg>
+            Data<br>Collection
+          </div>
+          <div class="lc-arrow"><svg width="20" height="12" viewBox="0 0 20 12">
+              <path d="M0 6h16M12 2l4 4-4 4" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" fill="none" />
+            </svg></div>
+          <div class="lc-node n2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="display:block;margin:0 auto 6px;">
+              <path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z" />
+            </svg>
+            Feature<br>Engineering
+          </div>
+          <div class="lc-arrow"><svg width="20" height="12" viewBox="0 0 20 12">
+              <path d="M0 6h16M12 2l4 4-4 4" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" fill="none" />
+            </svg></div>
+          <div class="lc-node n3">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="display:block;margin:0 auto 6px;">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 1v4M12 19v4M4.2 4.2l2.8 2.8M17 17l2.8 2.8M1 12h4M19 12h4M4.2 19.8l2.8-2.8M17 7l2.8-2.8" />
+            </svg>
+            Model<br>Training
+          </div>
+          <div class="lc-arrow"><svg width="20" height="12" viewBox="0 0 20 12">
+              <path d="M0 6h16M12 2l4 4-4 4" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" fill="none" />
+            </svg></div>
+          <div class="lc-node n4">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="display:block;margin:0 auto 6px;">
+              <path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+            </svg>
+            Evaluation<br>&amp; Validation
+          </div>
+          <div class="lc-arrow"><svg width="20" height="12" viewBox="0 0 20 12">
+              <path d="M0 6h16M12 2l4 4-4 4" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" fill="none" />
+            </svg></div>
+          <div class="lc-node n5">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="display:block;margin:0 auto 6px;">
+              <path d="M5 12h14M12 5l7 7-7 7" />
+            </svg>
+            Deployment<br>&amp; Serving
+          </div>
+          <div class="lc-arrow"><svg width="20" height="12" viewBox="0 0 20 12">
+              <path d="M0 6h16M12 2l4 4-4 4" stroke="rgba(255,255,255,0.3)" stroke-width="1.5" fill="none" />
+            </svg></div>
+          <div class="lc-node n6">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              style="display:block;margin:0 auto 6px;">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            Monitoring<br>&amp; Retraining
+          </div>
+        </div>
+        <p style="text-align:center; color:rgba(255,255,255,0.4); font-size:0.88em; margin-top:20px;">
+          Each stage introduces complexity, tooling fragmentation, and data movement risk.
+        </p>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE 3: SECTION — FEATURE STORE ==================== -->
+    <div class="slide slide-section">
+      <div style="position:relative;">
+        <h2>Part 1<br><span style="color:var(--sf-blue);">Feature Engineering &amp; Feature Store</span></h2>
+        <p class="section-sub">Encode domain expertise once. Serve everywhere. Never skew.</p>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE: WHAT IS A FEATURE STORE ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128218; Fundamentals</span>
+        <h2>What Is a <span class="accent">Feature Store</span>?</h2>
+        <p class="subtitle">Raw data goes in. <strong style="color:white;">Pre-computed, ready-to-use features</strong>
+          come out &mdash; organized by patient, refreshed automatically, and served to any model that needs them.</p>
+
+        <svg width="100%" viewBox="0 0 920 250" fill="none" xmlns="http://www.w3.org/2000/svg"
+          style="display:block;margin-top:8px;">
+          <defs>
+            <marker id="arrowWF" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <path d="M0 0L8 3L0 6" fill="none" stroke="rgba(41,181,232,0.7)" stroke-width="1.2" />
+            </marker>
+          </defs>
+
+          <rect x="15" y="20" width="155" height="210" rx="14" fill="rgba(41,181,232,0.05)"
+            stroke="rgba(41,181,232,0.25)" stroke-width="1.5" />
+          <text x="92" y="44" fill="#56C4EC" font-size="11" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">Raw Patient Data</text>
+          <rect x="30" y="58" width="125" height="20" rx="5" fill="rgba(255,255,255,0.04)"
+            stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+          <text x="92" y="72" fill="rgba(255,255,255,0.5)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">HEART_RATE = 92</text>
+          <rect x="30" y="84" width="125" height="20" rx="5" fill="rgba(255,255,255,0.04)"
+            stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+          <text x="92" y="98" fill="rgba(255,255,255,0.5)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">SYSTOLIC_BP = 138</text>
+          <rect x="30" y="110" width="125" height="20" rx="5" fill="rgba(255,255,255,0.04)"
+            stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+          <text x="92" y="124" fill="rgba(255,255,255,0.5)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">DIASTOLIC_BP = 82</text>
+          <rect x="30" y="136" width="125" height="20" rx="5" fill="rgba(255,255,255,0.04)"
+            stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+          <text x="92" y="150" fill="rgba(255,255,255,0.5)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">WEIGHT = 84</text>
+          <rect x="30" y="162" width="125" height="20" rx="5" fill="rgba(255,255,255,0.04)"
+            stroke="rgba(255,255,255,0.08)" stroke-width="1" />
+          <text x="92" y="176" fill="rgba(255,255,255,0.5)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">HEIGHT = 1.75</text>
+          <text x="92" y="210" fill="rgba(255,255,255,0.25)" font-size="7" text-anchor="middle"
+            font-family="Plus Jakarta Sans" font-style="italic">+ thousands more rows...</text>
+
+          <path d="M175 125 L240 125" stroke="rgba(41,181,232,0.5)" stroke-width="2" marker-end="url(#arrowWF)" />
+
+          <rect x="250" y="55" width="175" height="140" rx="14" fill="rgba(139,92,246,0.05)"
+            stroke="rgba(139,92,246,0.3)" stroke-width="1.8" />
+          <text x="337" y="82" fill="#A78BFA" font-size="10.5" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="800">Transformations</text>
+          <text x="337" y="98" fill="rgba(255,255,255,0.35)" font-size="7" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Snowpark queries</text>
+          <rect x="266" y="110" width="143" height="19" rx="5" fill="rgba(139,92,246,0.08)"
+            stroke="rgba(139,92,246,0.2)" stroke-width="1" />
+          <text x="337" y="123" fill="rgba(255,255,255,0.6)" font-size="7" text-anchor="middle"
+            font-family="JetBrains Mono">HR / SBP &rarr; SHOCK_IDX</text>
+          <rect x="266" y="134" width="143" height="19" rx="5" fill="rgba(139,92,246,0.08)"
+            stroke="rgba(139,92,246,0.2)" stroke-width="1" />
+          <text x="337" y="147" fill="rgba(255,255,255,0.6)" font-size="7" text-anchor="middle"
+            font-family="JetBrains Mono">SBP - DBP &rarr; PULSE_PR</text>
+          <rect x="266" y="158" width="143" height="19" rx="5" fill="rgba(139,92,246,0.08)"
+            stroke="rgba(139,92,246,0.2)" stroke-width="1" />
+          <text x="337" y="171" fill="rgba(255,255,255,0.6)" font-size="7" text-anchor="middle"
+            font-family="JetBrains Mono">W / H&sup2; &rarr; BMI</text>
+
+          <path d="M430 125 L495 125" stroke="rgba(41,181,232,0.5)" stroke-width="2" marker-end="url(#arrowWF)" />
+
+          <rect x="505" y="10" width="400" height="230" rx="16" fill="rgba(16,185,129,0.03)"
+            stroke="rgba(16,185,129,0.35)" stroke-width="2" />
+          <rect x="620" y="0" width="170" height="24" rx="12" fill="#091E33" stroke="rgba(16,185,129,0.5)"
+            stroke-width="1.5" />
+          <text x="705" y="16" fill="#34D399" font-size="9.5" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="800" letter-spacing="0.5">FEATURE STORE</text>
+          <text x="705" y="36" fill="rgba(255,255,255,0.3)" font-size="7" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Pre-computed features organized by entity</text>
+
+          <rect x="522" y="48" width="368" height="56" rx="10" fill="rgba(245,158,11,0.05)"
+            stroke="rgba(245,158,11,0.3)" stroke-width="1.5" />
+          <text x="540" y="66" fill="#FBBF24" font-size="9" font-family="Plus Jakarta Sans" font-weight="700">Patient
+            P001</text>
+          <text x="660" y="66" fill="rgba(255,255,255,0.25)" font-size="6.5" font-family="JetBrains Mono">PATIENT_ID =
+            P001</text>
+          <rect x="540" y="74" width="68" height="20" rx="10" fill="rgba(41,181,232,0.12)" stroke="rgba(41,181,232,0.3)"
+            stroke-width="1" />
+          <text x="574" y="88" fill="#56C4EC" font-size="6.5" text-anchor="middle" font-family="JetBrains Mono"
+            font-weight="600">SHOCK 0.67</text>
+          <rect x="614" y="74" width="68" height="20" rx="10" fill="rgba(139,92,246,0.12)" stroke="rgba(139,92,246,0.3)"
+            stroke-width="1" />
+          <text x="648" y="88" fill="#A78BFA" font-size="6.5" text-anchor="middle" font-family="JetBrains Mono"
+            font-weight="600">PULSE 56</text>
+          <rect x="688" y="74" width="55" height="20" rx="10" fill="rgba(16,185,129,0.12)" stroke="rgba(16,185,129,0.3)"
+            stroke-width="1" />
+          <text x="715" y="88" fill="#34D399" font-size="6.5" text-anchor="middle" font-family="JetBrains Mono"
+            font-weight="600">BMI 27</text>
+          <rect x="749" y="74" width="80" height="20" rx="10" fill="rgba(236,72,153,0.12)" stroke="rgba(236,72,153,0.3)"
+            stroke-width="1" />
+          <text x="789" y="88" fill="#F472B6" font-size="6.5" text-anchor="middle" font-family="JetBrains Mono"
+            font-weight="600">RISK MEDIUM</text>
+
+          <rect x="522" y="112" width="368" height="56" rx="10" fill="rgba(245,158,11,0.05)"
+            stroke="rgba(245,158,11,0.3)" stroke-width="1.5" />
+          <text x="540" y="130" fill="#FBBF24" font-size="9" font-family="Plus Jakarta Sans" font-weight="700">Patient
+            P002</text>
+          <text x="660" y="130" fill="rgba(255,255,255,0.25)" font-size="6.5" font-family="JetBrains Mono">PATIENT_ID =
+            P002</text>
+          <rect x="540" y="138" width="68" height="20" rx="10" fill="rgba(41,181,232,0.12)"
+            stroke="rgba(41,181,232,0.3)" stroke-width="1" />
+          <text x="574" y="152" fill="#56C4EC" font-size="6.5" text-anchor="middle" font-family="JetBrains Mono"
+            font-weight="600">SHOCK 0.55</text>
+          <rect x="614" y="138" width="68" height="20" rx="10" fill="rgba(139,92,246,0.12)"
+            stroke="rgba(139,92,246,0.3)" stroke-width="1" />
+          <text x="648" y="152" fill="#A78BFA" font-size="6.5" text-anchor="middle" font-family="JetBrains Mono"
+            font-weight="600">PULSE 48</text>
+          <rect x="688" y="138" width="55" height="20" rx="10" fill="rgba(16,185,129,0.12)"
+            stroke="rgba(16,185,129,0.3)" stroke-width="1" />
+          <text x="715" y="152" fill="#34D399" font-size="6.5" text-anchor="middle" font-family="JetBrains Mono"
+            font-weight="600">BMI 23</text>
+          <rect x="749" y="138" width="80" height="20" rx="10" fill="rgba(16,185,129,0.12)"
+            stroke="rgba(16,185,129,0.3)" stroke-width="1" />
+          <text x="789" y="152" fill="#34D399" font-size="6.5" text-anchor="middle" font-family="JetBrains Mono"
+            font-weight="600">RISK LOW</text>
+
+          <rect x="522" y="176" width="368" height="52" rx="10" fill="rgba(245,158,11,0.03)"
+            stroke="rgba(245,158,11,0.15)" stroke-width="1" stroke-dasharray="4 3" />
+          <text x="706" y="206" fill="rgba(255,255,255,0.2)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans" font-style="italic">Patient P003, P004, ... (thousands of entities)</text>
+        </svg>
+
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:10px;">
+          <div
+            style="padding:10px 8px;border-radius:10px;background:rgba(41,181,232,0.05);border:1px solid rgba(41,181,232,0.2);text-align:center;">
+            <div style="font-size:0.95em;margin-bottom:4px;">&#128337;</div>
+            <div style="font-size:0.7em;font-weight:700;color:#56C4EC;line-height:1.3;">Point-in-Time Correctness</div>
+            <div style="font-size:0.62em;color:rgba(255,255,255,0.4);margin-top:3px;line-height:1.4;">No data leakage in
+              training</div>
+          </div>
+          <div
+            style="padding:10px 8px;border-radius:10px;background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.2);text-align:center;">
+            <div style="font-size:0.95em;margin-bottom:4px;">&#128101;</div>
+            <div style="font-size:0.7em;font-weight:700;color:#A78BFA;line-height:1.3;">Shared Across Teams</div>
+            <div style="font-size:0.62em;color:rgba(255,255,255,0.4);margin-top:3px;line-height:1.4;">Any model can
+              reuse features</div>
+          </div>
+          <div
+            style="padding:10px 8px;border-radius:10px;background:rgba(16,185,129,0.05);border:1px solid rgba(16,185,129,0.2);text-align:center;">
+            <div style="font-size:0.95em;margin-bottom:4px;">&#9889;</div>
+            <div style="font-size:0.7em;font-weight:700;color:#34D399;line-height:1.3;">Auto-Refresh</div>
+            <div style="font-size:0.62em;color:rgba(255,255,255,0.4);margin-top:3px;line-height:1.4;">Dynamic Tables on
+              a schedule</div>
+          </div>
+          <div
+            style="padding:10px 8px;border-radius:10px;background:rgba(245,158,11,0.05);border:1px solid rgba(245,158,11,0.2);text-align:center;">
+            <div style="font-size:0.95em;margin-bottom:4px;">&#128451;</div>
+            <div style="font-size:0.7em;font-weight:700;color:#FBBF24;line-height:1.3;">Immutable Datasets</div>
+            <div style="font-size:0.62em;color:rgba(255,255,255,0.4);margin-top:3px;line-height:1.4;">Versioned,
+              reproducible snapshots</div>
+          </div>
+          <div
+            style="padding:10px 8px;border-radius:10px;background:rgba(236,72,153,0.05);border:1px solid rgba(236,72,153,0.2);text-align:center;">
+            <div style="font-size:0.95em;margin-bottom:4px;">&#128275;</div>
+            <div style="font-size:0.7em;font-weight:700;color:#F472B6;line-height:1.3;">Zero Skew</div>
+            <div style="font-size:0.62em;color:rgba(255,255,255,0.4);margin-top:3px;line-height:1.4;">Same features for
+              train &amp; serve</div>
+          </div>
+          <div
+            style="padding:10px 8px;border-radius:10px;background:rgba(239,68,68,0.05);border:1px solid rgba(239,68,68,0.2);text-align:center;">
+            <div style="font-size:0.95em;margin-bottom:4px;">&#128279;</div>
+            <div style="font-size:0.7em;font-weight:700;color:#FCA5A5;line-height:1.3;">Automatic Lineage</div>
+            <div style="font-size:0.62em;color:rgba(255,255,255,0.4);margin-top:3px;line-height:1.4;">Source &rarr;
+              features &rarr; model</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE 4: FEATURE STORE CONCEPTS ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128161; Concepts</span>
+        <h2>Feature Store <span class="accent">Core Concepts</span></h2>
+        <p class="subtitle">A managed layer between raw data and ML models &mdash; owns transformation logic, keeps
+          features fresh, and serves the <strong style="color:white;">same features</strong> to both training and
+          inference. In Snowflake, a Feature Store is simply a <strong style="color:white;">schema</strong>.</p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:16px;">
+
+          <div
+            style="padding:22px 24px;border-radius:16px;background:linear-gradient(135deg,rgba(245,158,11,0.05),transparent);border:1px solid rgba(245,158,11,0.3);border-left:4px solid var(--sf-orange);">
+            <h3 style="font-size:1.05em;font-weight:800;color:#FBBF24;margin-bottom:10px;">&#128204; Entity</h3>
+            <p style="font-size:0.88em;color:rgba(255,255,255,0.7);line-height:1.7;margin-bottom:14px;">The <strong
+                style="color:white;">real-world object</strong> your features describe. Defined by one or more <strong
+                style="color:#FBBF24;">join keys</strong> (e.g. <code
+                style="color:#FBBF24;font-family:'JetBrains Mono';font-size:0.9em;">PATIENT_ID</code>).</p>
+            <div
+              style="padding:12px 14px;border-radius:10px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.06);">
+              <p style="font-size:0.8em;color:rgba(255,255,255,0.55);line-height:1.6;"><strong
+                  style="color:#FBBF24;">Key idea:</strong> A single Entity can link <em>many</em> Feature Views
+                together. It&rsquo;s the glue that lets you combine features from different sources into one training
+                dataset.</p>
+            </div>
+          </div>
+
+          <div
+            style="padding:22px 24px;border-radius:16px;background:linear-gradient(135deg,rgba(16,185,129,0.05),transparent);border:1px solid rgba(16,185,129,0.3);border-left:4px solid var(--sf-green);">
+            <h3 style="font-size:1.05em;font-weight:800;color:#34D399;margin-bottom:10px;">&#128065; Feature View</h3>
+            <p style="font-size:0.88em;color:rgba(255,255,255,0.7);line-height:1.7;margin-bottom:14px;">The <strong
+                style="color:white;">transformation + materialization</strong>. A Snowpark query wrapped into a <strong
+                style="color:#34D399;">Dynamic Table</strong> that auto-refreshes on a schedule.</p>
+            <div
+              style="padding:12px 14px;border-radius:10px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.06);">
+              <p style="font-size:0.8em;color:rgba(255,255,255,0.55);line-height:1.6;"><strong
+                  style="color:#34D399;">Key idea:</strong> A Feature View references one or more Entities via their
+                join keys. It defines <em>what</em> to compute and <em>how often</em> to refresh.</p>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:20px;">
+          <svg width="100%" viewBox="0 0 860 140" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;">
+            <defs>
+              <marker id="arrowCC" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+                <path d="M0 0L7 2.5L0 5" fill="none" stroke="rgba(245,158,11,0.8)" stroke-width="1.2" />
+              </marker>
+            </defs>
+
+            <rect x="20" y="30" width="150" height="80" rx="12" fill="rgba(245,158,11,0.08)"
+              stroke="rgba(245,158,11,0.4)" stroke-width="1.8" />
+            <text x="95" y="58" fill="#FBBF24" font-size="13" text-anchor="middle" font-family="Plus Jakarta Sans"
+              font-weight="800">PATIENT</text>
+            <text x="95" y="78" fill="rgba(255,255,255,0.5)" font-size="9" text-anchor="middle"
+              font-family="JetBrains Mono">PATIENT_ID</text>
+            <text x="95" y="98" fill="rgba(255,255,255,0.3)" font-size="8" text-anchor="middle"
+              font-family="Plus Jakarta Sans">Entity (join key)</text>
+
+            <line x1="175" y1="55" x2="330" y2="45" stroke="rgba(245,158,11,0.6)" stroke-width="2"
+              marker-end="url(#arrowCC)" />
+            <line x1="175" y1="85" x2="330" y2="95" stroke="rgba(245,158,11,0.6)" stroke-width="2"
+              marker-end="url(#arrowCC)" />
+
+            <text x="252" y="38" fill="rgba(245,158,11,0.7)" font-size="8" text-anchor="middle"
+              font-family="Plus Jakarta Sans" font-weight="600">PATIENT_ID</text>
+            <text x="252" y="106" fill="rgba(245,158,11,0.7)" font-size="8" text-anchor="middle"
+              font-family="Plus Jakarta Sans" font-weight="600">PATIENT_ID</text>
+
+            <rect x="335" y="10" width="230" height="60" rx="12" fill="rgba(16,185,129,0.06)"
+              stroke="rgba(16,185,129,0.5)" stroke-width="1.8" />
+            <text x="450" y="34" fill="#34D399" font-size="11" text-anchor="middle" font-family="Plus Jakarta Sans"
+              font-weight="700">PATIENT_VITALS_FV</text>
+            <text x="450" y="52" fill="rgba(255,255,255,0.45)" font-size="8" text-anchor="middle"
+              font-family="Plus Jakarta Sans">SHOCK_INDEX, PULSE_PRESSURE, BMI ...</text>
+            <text x="450" y="64" fill="rgba(16,185,129,0.5)" font-size="7" text-anchor="middle"
+              font-family="JetBrains Mono">refresh = 1 min</text>
+
+            <rect x="335" y="78" width="230" height="52" rx="12" fill="rgba(16,185,129,0.06)"
+              stroke="rgba(16,185,129,0.5)" stroke-width="1.8" />
+            <text x="450" y="100" fill="#34D399" font-size="11" text-anchor="middle" font-family="Plus Jakarta Sans"
+              font-weight="700">ENCOUNTER_OUTCOMES_FV</text>
+            <text x="450" y="118" fill="rgba(255,255,255,0.45)" font-size="8" text-anchor="middle"
+              font-family="Plus Jakarta Sans">LOS_DAYS, READMIT_30D ...</text>
+
+            <text x="620" y="40" fill="rgba(255,255,255,0.35)" font-size="9" font-family="Plus Jakarta Sans"
+              font-style="italic">&larr; Feature Views</text>
+            <text x="620" y="55" fill="rgba(255,255,255,0.25)" font-size="8" font-family="Plus Jakarta Sans">(Dynamic
+              Tables)</text>
+
+            <text x="620" y="95" fill="rgba(255,255,255,0.35)" font-size="9" font-family="Plus Jakarta Sans"
+              font-style="italic">&larr; One Entity links</text>
+            <text x="620" y="110" fill="rgba(255,255,255,0.25)" font-size="8" font-family="Plus Jakarta Sans">many
+              Feature Views</text>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE: COMPLEX FEATURES ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#129504; Advanced</span>
+        <h2>Features Can Be <span class="accent">Complex</span></h2>
+        <p class="subtitle">Features aren&rsquo;t limited to simple ratios. The most powerful features encode <strong
+            style="color:white;">domain expertise</strong> and even the output of <strong style="color:white;">other ML
+            models</strong>.</p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:12px;">
+          <div style="display:flex;flex-direction:column;gap:14px;">
+            <div
+              style="padding:18px;border-radius:14px;background:rgba(239,68,68,0.04);border:1px solid rgba(239,68,68,0.2);">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+                <span style="font-size:1.4em;">&#129658;</span>
+                <h3 style="font-size:0.95em;font-weight:800;color:#FCA5A5;">Cancer Risk Score</h3>
+              </div>
+              <p style="font-size:0.78em;color:rgba(255,255,255,0.6);line-height:1.65;margin-bottom:12px;">A feature
+                that wraps a <strong style="color:white;">Cox proportional-hazards model</strong> combining age, family
+                history, genomic markers, and lab trends into a single <strong style="color:#FCA5A5;">10-year cancer
+                  risk probability</strong>. Too expensive to compute at inference time &mdash; so it&rsquo;s
+                pre-materialized.</p>
+              <div
+                style="padding:10px 12px;border-radius:8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);font-family:'JetBrains Mono','Fira Code',monospace;">
+                <pre
+                  style="font-size:0.65em;line-height:1.6;color:rgba(255,255,255,0.8);white-space:pre-wrap;margin:0;"><span style="color:rgba(255,255,255,0.35);">-- Feature View query (simplified)</span>
+<span style="color:#C792EA;">SELECT</span> PATIENT_ID, TIMESTAMP,
+  <span style="color:#FFCB6B;">cancer_risk_udf</span>(
+    age, family_hx, brca_status,
+    smoking_years, bmi_trend_12mo,
+    crp_level, wbc_trend_6mo
+  ) <span style="color:#C792EA;">AS</span> <span style="color:#F78C6C;">CANCER_RISK_10YR</span>,
+  <span style="color:#C792EA;">CASE WHEN</span> CANCER_RISK_10YR > <span style="color:#F78C6C;">0.20</span>
+    <span style="color:#C792EA;">THEN</span> <span style="color:#C3E88D;">'HIGH'</span>
+    <span style="color:#C792EA;">WHEN</span> CANCER_RISK_10YR > <span style="color:#F78C6C;">0.10</span>
+    <span style="color:#C792EA;">THEN</span> <span style="color:#C3E88D;">'MODERATE'</span>
+    <span style="color:#C792EA;">ELSE</span> <span style="color:#C3E88D;">'LOW'</span>
+  <span style="color:#C792EA;">END AS</span> <span style="color:#F78C6C;">CANCER_RISK_TIER</span>
+<span style="color:#C792EA;">FROM</span> PATIENT_LONGITUDINAL;</pre>
+              </div>
+            </div>
+            <div
+              style="padding:12px 16px;border-radius:10px;background:rgba(245,158,11,0.05);border:1px solid rgba(245,158,11,0.15);">
+              <p style="font-size:0.76em;color:rgba(255,255,255,0.55);line-height:1.5;text-align:center;"><strong
+                  style="color:#FBBF24;">Key insight:</strong> the cancer risk score is itself an ML model output
+                &mdash; but when consumed by a downstream readmission predictor, it&rsquo;s <em>just another feature
+                  column</em>.</p>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:14px;">
+            <div
+              style="padding:18px;border-radius:14px;background:rgba(139,92,246,0.04);border:1px solid rgba(139,92,246,0.2);">
+              <div
+                style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#A78BFA;margin-bottom:12px;">
+                More Complex Feature Examples</div>
+              <div style="display:flex;flex-direction:column;gap:10px;">
+                <div style="display:flex;gap:10px;align-items:flex-start;">
+                  <span
+                    style="width:28px;height:28px;flex-shrink:0;border-radius:8px;background:rgba(41,181,232,0.12);display:flex;align-items:center;justify-content:center;font-size:0.85em;">&#128200;</span>
+                  <div>
+                    <div style="font-size:0.82em;font-weight:700;color:white;">90-Day Rolling Readmission Rate</div>
+                    <div style="font-size:0.72em;color:rgba(255,255,255,0.45);line-height:1.5;">Window function scanning
+                      months of encounter history per patient &mdash; joins 2 tables, O(n) per patient.</div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:10px;align-items:flex-start;">
+                  <span
+                    style="width:28px;height:28px;flex-shrink:0;border-radius:8px;background:rgba(16,185,129,0.12);display:flex;align-items:center;justify-content:center;font-size:0.85em;">&#128138;</span>
+                  <div>
+                    <div style="font-size:0.82em;font-weight:700;color:white;">Medication Interaction Score</div>
+                    <div style="font-size:0.72em;color:rgba(255,255,255,0.45);line-height:1.5;">Cross-join of active
+                      prescriptions against a contraindication graph &mdash; combinatorial complexity.</div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:10px;align-items:flex-start;">
+                  <span
+                    style="width:28px;height:28px;flex-shrink:0;border-radius:8px;background:rgba(245,158,11,0.12);display:flex;align-items:center;justify-content:center;font-size:0.85em;">&#129516;</span>
+                  <div>
+                    <div style="font-size:0.82em;font-weight:700;color:white;">Charlson Comorbidity Index</div>
+                    <div style="font-size:0.72em;color:rgba(255,255,255,0.45);line-height:1.5;">Weighted sum across 17
+                      disease categories from full diagnosis history &mdash; standardized clinical risk metric.</div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:10px;align-items:flex-start;">
+                  <span
+                    style="width:28px;height:28px;flex-shrink:0;border-radius:8px;background:rgba(236,72,153,0.12);display:flex;align-items:center;justify-content:center;font-size:0.85em;">&#128290;</span>
+                  <div>
+                    <div style="font-size:0.82em;font-weight:700;color:white;">NLP-Derived Social Determinants</div>
+                    <div style="font-size:0.72em;color:rgba(255,255,255,0.45);line-height:1.5;">Cortex LLM extraction
+                      from clinical notes &mdash; housing stability, transportation access, food security.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+              <div
+                style="padding:12px;border-radius:10px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2);text-align:center;">
+                <div
+                  style="font-size:0.62em;color:rgba(239,68,68,0.7);font-weight:700;text-transform:uppercase;letter-spacing:1px;">
+                  Compute on-the-fly</div>
+                <div style="font-size:1.2em;font-weight:800;color:#FCA5A5;">5&ndash;30s</div>
+                <div style="font-size:0.6em;color:rgba(255,255,255,0.35);">UDF + joins + window scans</div>
+              </div>
+              <div
+                style="padding:12px;border-radius:10px;background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.2);text-align:center;">
+                <div
+                  style="font-size:0.62em;color:var(--sf-green);font-weight:700;text-transform:uppercase;letter-spacing:1px;">
+                  Pre-materialized lookup</div>
+                <div style="font-size:1.2em;font-weight:800;color:#34D399;">~30ms</div>
+                <div style="font-size:0.6em;color:rgba(255,255,255,0.35);">Online Store key lookup</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE: POINT-IN-TIME (READMISSION EXAMPLE) ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128337; Point-in-Time</span>
+        <h2>Why Point-in-Time <span class="accent">Correctness</span> Matters</h2>
+        <p class="subtitle">We want to predict <strong style="color:white;">30-day readmission risk at
+            discharge</strong>. The model must only see what the care team knew <em>at that moment</em> &mdash; nothing
+          from after the patient left.</p>
+
+        <svg width="100%" viewBox="0 0 900 310" fill="none" xmlns="http://www.w3.org/2000/svg"
+          style="display:block;margin-top:6px;">
+
+          <line x1="80" y1="65" x2="840" y2="65" stroke="rgba(255,255,255,0.12)" stroke-width="2.5" />
+          <text x="80" y="52" fill="rgba(255,255,255,0.25)" font-size="8" font-family="Plus Jakarta Sans"
+            font-weight="600">PATIENT P001 TIMELINE</text>
+
+          <circle cx="160" cy="65" r="6" fill="rgba(41,181,232,0.5)" />
+          <text x="160" y="88" fill="rgba(255,255,255,0.6)" font-size="8.5" text-anchor="middle"
+            font-family="JetBrains Mono" font-weight="600">Jan 3</text>
+          <text x="160" y="102" fill="rgba(255,255,255,0.4)" font-size="7.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Admission</text>
+
+          <circle cx="310" cy="65" r="6" fill="rgba(41,181,232,0.5)" />
+          <text x="310" y="88" fill="rgba(255,255,255,0.6)" font-size="8.5" text-anchor="middle"
+            font-family="JetBrains Mono" font-weight="600">Jan 7</text>
+          <text x="310" y="102" fill="rgba(255,255,255,0.4)" font-size="7.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Lab Results</text>
+
+          <circle cx="460" cy="65" r="10" fill="var(--sf-orange)" stroke="#091E33" stroke-width="3" />
+          <text x="460" y="88" fill="#FBBF24" font-size="9.5" text-anchor="middle" font-family="JetBrains Mono"
+            font-weight="700">Jan 10</text>
+          <text x="460" y="102" fill="#FBBF24" font-size="8" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">DISCHARGE</text>
+          <text x="460" y="115" fill="rgba(245,158,11,0.6)" font-size="7" text-anchor="middle"
+            font-family="Plus Jakarta Sans">prediction point</text>
+
+          <circle cx="610" cy="65" r="6" fill="rgba(239,68,68,0.5)" />
+          <text x="610" y="88" fill="rgba(239,68,68,0.7)" font-size="8.5" text-anchor="middle"
+            font-family="JetBrains Mono" font-weight="600">Jan 17</text>
+          <text x="610" y="102" fill="rgba(239,68,68,0.5)" font-size="7.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Follow-up Visit</text>
+
+          <circle cx="760" cy="65" r="6" fill="rgba(239,68,68,0.5)" />
+          <text x="760" y="88" fill="rgba(239,68,68,0.7)" font-size="8.5" text-anchor="middle"
+            font-family="JetBrains Mono" font-weight="600">Feb 2</text>
+          <text x="760" y="102" fill="rgba(239,68,68,0.5)" font-size="7.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Readmitted</text>
+
+          <rect x="100" y="28" width="380" height="8" rx="4" fill="rgba(16,185,129,0.2)" />
+          <text x="290" y="22" fill="#34D399" font-size="7.5" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">&#10003; AVAILABLE AT DISCHARGE</text>
+
+          <rect x="490" y="28" width="310" height="8" rx="4" fill="rgba(239,68,68,0.15)" />
+          <text x="645" y="22" fill="rgba(239,68,68,0.6)" font-size="7.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans" font-weight="700">&#10007; FUTURE &mdash; CANNOT USE</text>
+
+          <line x1="460" y1="18" x2="460" y2="120" stroke="rgba(245,158,11,0.4)" stroke-width="1.5"
+            stroke-dasharray="4 3" />
+
+          <rect x="80" y="135" width="370" height="155" rx="14" fill="rgba(16,185,129,0.04)"
+            stroke="rgba(16,185,129,0.25)" stroke-width="1.5" />
+          <text x="100" y="160" fill="#34D399" font-size="10.5" font-family="Plus Jakarta Sans"
+            font-weight="800">&#10003; Valid Features (known at discharge)</text>
+
+          <rect x="100" y="172" width="155" height="24" rx="6" fill="rgba(41,181,232,0.08)"
+            stroke="rgba(41,181,232,0.2)" stroke-width="1" />
+          <text x="177" y="188" fill="rgba(255,255,255,0.6)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">SHOCK_INDEX = 0.67</text>
+
+          <rect x="264" y="172" width="165" height="24" rx="6" fill="rgba(41,181,232,0.08)"
+            stroke="rgba(41,181,232,0.2)" stroke-width="1" />
+          <text x="346" y="188" fill="rgba(255,255,255,0.6)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">PULSE_PRESSURE = 56</text>
+
+          <rect x="100" y="202" width="155" height="24" rx="6" fill="rgba(41,181,232,0.08)"
+            stroke="rgba(41,181,232,0.2)" stroke-width="1" />
+          <text x="177" y="218" fill="rgba(255,255,255,0.6)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">LOS_DAYS = 7</text>
+
+          <rect x="264" y="202" width="165" height="24" rx="6" fill="rgba(41,181,232,0.08)"
+            stroke="rgba(41,181,232,0.2)" stroke-width="1" />
+          <text x="346" y="218" fill="rgba(255,255,255,0.6)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">RISK_LEVEL = MEDIUM</text>
+
+          <text x="100" y="248" fill="rgba(255,255,255,0.4)" font-size="8" font-family="Plus Jakarta Sans">Lab results,
+            vitals, diagnosis codes &mdash; all recorded <tspan fill="white" font-weight="600">before or at discharge
+            </tspan>.</text>
+          <text x="100" y="264" fill="rgba(255,255,255,0.4)" font-size="8" font-family="Plus Jakarta Sans">This is what
+            the care team actually knew when making the discharge decision.</text>
+          <text x="100" y="280" fill="rgba(255,255,255,0.4)" font-size="8" font-family="Plus Jakarta Sans">The model
+            should only train on features that were <tspan fill="#34D399" font-weight="600">observable at prediction
+              time</tspan>.</text>
+
+          <rect x="475" y="135" width="385" height="155" rx="14" fill="rgba(239,68,68,0.04)"
+            stroke="rgba(239,68,68,0.2)" stroke-width="1.5" />
+          <text x="495" y="160" fill="#FCA5A5" font-size="10.5" font-family="Plus Jakarta Sans"
+            font-weight="800">&#10007; Leaked Features (from the future)</text>
+
+          <rect x="495" y="172" width="185" height="24" rx="6" fill="rgba(239,68,68,0.06)" stroke="rgba(239,68,68,0.15)"
+            stroke-width="1" />
+          <text x="587" y="188" fill="rgba(239,68,68,0.6)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">FOLLOW_UP_BP = 122/78</text>
+
+          <rect x="690" y="172" width="150" height="24" rx="6" fill="rgba(239,68,68,0.06)" stroke="rgba(239,68,68,0.15)"
+            stroke-width="1" />
+          <text x="765" y="188" fill="rgba(239,68,68,0.6)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">IMPROVED = TRUE</text>
+
+          <rect x="495" y="202" width="185" height="24" rx="6" fill="rgba(239,68,68,0.06)" stroke="rgba(239,68,68,0.15)"
+            stroke-width="1" />
+          <text x="587" y="218" fill="rgba(239,68,68,0.6)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">READMITTED_30D = YES</text>
+
+          <text x="495" y="248" fill="rgba(255,255,255,0.4)" font-size="8" font-family="Plus Jakarta Sans">The follow-up
+            shows <tspan fill="#FCA5A5" font-weight="600">improving vitals</tspan>. If the model trains on this, it
+            learns the patient</text>
+          <text x="495" y="264" fill="rgba(255,255,255,0.4)" font-size="8" font-family="Plus Jakarta Sans">was
+            recovering &mdash; <tspan fill="#FCA5A5" font-weight="600">information that didn&rsquo;t exist at discharge
+            </tspan>. The model looks</text>
+          <text x="495" y="280" fill="rgba(255,255,255,0.4)" font-size="8" font-family="Plus Jakarta Sans">accurate in
+            testing but <tspan fill="#FCA5A5" font-weight="600">fails in production</tspan> where future data
+            isn&rsquo;t available.</text>
+        </svg>
+
+        <div
+          style="margin-top:6px;padding:10px 18px;border-radius:10px;background:rgba(245,158,11,0.04);border:1px solid rgba(245,158,11,0.15);text-align:center;">
+          <p style="font-size:0.8em;color:rgba(255,255,255,0.55);line-height:1.5;"><strong style="color:#FBBF24;">The
+              rule:</strong> When training a model to predict at discharge, features must come from <strong
+              style="color:white;">&le; discharge time</strong>. Snowflake&rsquo;s <code
+              style="color:#34D399;font-family:'JetBrains Mono';font-size:0.9em;">spine_timestamp_col</code> enforces
+            this automatically via an AS-OF join &mdash; no manual filtering needed.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE: POINT-IN-TIME EXAMPLE ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128337; Example</span>
+        <h2>Point-in-Time <span class="accent">by Example</span></h2>
+        <p class="subtitle">Walk through exactly which feature rows get joined for each spine entry.</p>
+
+        <div style="display:grid;grid-template-columns:1fr auto 1.6fr;gap:18px;align-items:start;margin-top:12px;">
+
+          <div>
+            <div
+              style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-purple);margin-bottom:10px;">
+              Spine (prediction events)</div>
+            <table
+              style="width:100%;border-collapse:separate;border-spacing:0;font-size:0.78em;border-radius:10px;overflow:hidden;border:1px solid rgba(139,92,246,0.25);">
+              <thead>
+                <tr style="background:rgba(139,92,246,0.12);">
+                  <th style="padding:8px 12px;text-align:left;color:#A78BFA;font-weight:700;font-size:0.9em;">PATIENT_ID
+                  </th>
+                  <th style="padding:8px 12px;text-align:left;color:#A78BFA;font-weight:700;font-size:0.9em;">TIMESTAMP
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="background:rgba(255,255,255,0.02);">
+                  <td
+                    style="padding:7px 12px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    P001</td>
+                  <td
+                    style="padding:7px 12px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    Jan 15</td>
+                </tr>
+                <tr style="background:rgba(255,255,255,0.04);">
+                  <td
+                    style="padding:7px 12px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    P002</td>
+                  <td
+                    style="padding:7px 12px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    Feb 20</td>
+                </tr>
+              </tbody>
+            </table>
+            <p style="font-size:0.72em;color:rgba(255,255,255,0.35);margin-top:8px;line-height:1.5;">The <strong
+                style="color:#A78BFA;">&ldquo;who + when&rdquo;</strong> of each prediction event.</p>
+          </div>
+
+          <div style="display:flex;align-items:center;padding-top:40px;">
+            <svg width="50" height="60" viewBox="0 0 50 60"><text x="25" y="25" fill="rgba(255,255,255,0.3)"
+                font-size="10" text-anchor="middle" font-family="Plus Jakarta Sans" font-weight="700">AS-OF</text><text
+                x="25" y="40" fill="rgba(255,255,255,0.3)" font-size="10" text-anchor="middle"
+                font-family="Plus Jakarta Sans" font-weight="700">JOIN</text>
+              <path d="M10 50 L40 50" stroke="rgba(41,181,232,0.5)" stroke-width="2" marker-end="url(#arrowPIT)" />
+              <defs>
+                <marker id="arrowPIT" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto">
+                  <path d="M0 0L7 2.5L0 5" fill="none" stroke="rgba(41,181,232,0.5)" stroke-width="1.2" />
+                </marker>
+              </defs>
+            </svg>
+          </div>
+
+          <div>
+            <div
+              style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-green);margin-bottom:10px;">
+              Feature View (Dynamic Table)</div>
+            <table
+              style="width:100%;border-collapse:separate;border-spacing:0;font-size:0.78em;border-radius:10px;overflow:hidden;border:1px solid rgba(16,185,129,0.25);">
+              <thead>
+                <tr style="background:rgba(16,185,129,0.12);">
+                  <th style="padding:8px 10px;text-align:left;color:#34D399;font-weight:700;font-size:0.9em;">PATIENT_ID
+                  </th>
+                  <th style="padding:8px 10px;text-align:left;color:#34D399;font-weight:700;font-size:0.9em;">TIMESTAMP
+                  </th>
+                  <th style="padding:8px 10px;text-align:left;color:#34D399;font-weight:700;font-size:0.9em;">SHOCK_IDX
+                  </th>
+                  <th style="padding:8px 10px;text-align:left;color:#34D399;font-weight:700;font-size:0.9em;">RISK</th>
+                  <th style="padding:8px 10px;text-align:center;color:#34D399;font-weight:700;font-size:0.9em;">USED?
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="background:rgba(16,185,129,0.06);">
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    P001</td>
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    Jan 10</td>
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    0.61</td>
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    MED</td>
+                  <td style="padding:6px 10px;text-align:center;font-size:1em;color:#34D399;font-weight:700;">&#10003;
+                  </td>
+                </tr>
+                <tr style="background:rgba(239,68,68,0.06);opacity:0.6;">
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.5);font-family:'JetBrains Mono';font-size:0.92em;">
+                    P001</td>
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.5);font-family:'JetBrains Mono';font-size:0.92em;">
+                    Jan 20</td>
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.5);font-family:'JetBrains Mono';font-size:0.92em;">
+                    0.74</td>
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.5);font-family:'JetBrains Mono';font-size:0.92em;">
+                    HIGH</td>
+                  <td style="padding:6px 10px;text-align:center;font-size:1em;color:#EF4444;font-weight:700;">&#10007;
+                  </td>
+                </tr>
+                <tr style="background:rgba(16,185,129,0.06);">
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    P002</td>
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    Feb 18</td>
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    0.55</td>
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    LOW</td>
+                  <td style="padding:6px 10px;text-align:center;font-size:1em;color:#34D399;font-weight:700;">&#10003;
+                  </td>
+                </tr>
+                <tr style="background:rgba(16,185,129,0.06);">
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    P002</td>
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    Feb 10</td>
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    0.68</td>
+                  <td
+                    style="padding:6px 10px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                    MED</td>
+                  <td style="padding:6px 10px;text-align:center;color:rgba(255,255,255,0.25);font-size:0.75em;">older
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p style="font-size:0.72em;color:rgba(255,255,255,0.35);margin-top:8px;line-height:1.5;">Only features with
+              <code style="color:#34D399;">ts &le; spine ts</code> are eligible. The <strong style="color:#34D399;">most
+                recent</strong> eligible row wins.</p>
+          </div>
+        </div>
+
+        <div style="margin-top:16px;">
+          <div
+            style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-blue);margin-bottom:10px;">
+            Result: Training Dataset (point-in-time correct)</div>
+          <table
+            style="width:100%;border-collapse:separate;border-spacing:0;font-size:0.82em;border-radius:10px;overflow:hidden;border:1px solid rgba(41,181,232,0.25);">
+            <thead>
+              <tr style="background:rgba(41,181,232,0.12);">
+                <th style="padding:8px 14px;text-align:left;color:#56C4EC;font-weight:700;">PATIENT_ID</th>
+                <th style="padding:8px 14px;text-align:left;color:#56C4EC;font-weight:700;">SPINE_TS</th>
+                <th style="padding:8px 14px;text-align:left;color:#56C4EC;font-weight:700;">FEATURE_TS</th>
+                <th style="padding:8px 14px;text-align:left;color:#56C4EC;font-weight:700;">SHOCK_INDEX</th>
+                <th style="padding:8px 14px;text-align:left;color:#56C4EC;font-weight:700;">RISK_LEVEL</th>
+                <th style="padding:8px 14px;text-align:left;color:#56C4EC;font-weight:700;">WHY THIS ROW?</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="background:rgba(255,255,255,0.02);">
+                <td style="padding:7px 14px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                  P001</td>
+                <td style="padding:7px 14px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                  Jan 15</td>
+                <td style="padding:7px 14px;color:#34D399;font-family:'JetBrains Mono';font-size:0.92em;">Jan 10</td>
+                <td style="padding:7px 14px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                  0.61</td>
+                <td style="padding:7px 14px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                  MED</td>
+                <td style="padding:7px 14px;color:rgba(255,255,255,0.45);font-size:0.88em;">Jan 10 &le; Jan 15
+                  &nbsp;&#10003;&nbsp; <span style="color:rgba(239,68,68,0.7);">Jan 20 &gt; Jan 15 excluded</span></td>
+              </tr>
+              <tr style="background:rgba(255,255,255,0.04);">
+                <td style="padding:7px 14px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                  P002</td>
+                <td style="padding:7px 14px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                  Feb 20</td>
+                <td style="padding:7px 14px;color:#34D399;font-family:'JetBrains Mono';font-size:0.92em;">Feb 18</td>
+                <td style="padding:7px 14px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                  0.55</td>
+                <td style="padding:7px 14px;color:rgba(255,255,255,0.7);font-family:'JetBrains Mono';font-size:0.92em;">
+                  LOW</td>
+                <td style="padding:7px 14px;color:rgba(255,255,255,0.45);font-size:0.88em;">Feb 18 &le; Feb 20
+                  &nbsp;&#10003;&nbsp; <span style="color:rgba(255,255,255,0.3);">Feb 10 also valid but older</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div
+          style="margin-top:12px;padding:10px 18px;border-radius:10px;background:rgba(245,158,11,0.04);border:1px solid rgba(245,158,11,0.15);text-align:center;">
+          <p style="font-size:0.78em;color:rgba(255,255,255,0.55);line-height:1.5;"><strong
+              style="color:#FBBF24;">Rule:</strong> For each spine row, join the <strong style="color:white;">most
+              recent feature row</strong> where <code style="color:#34D399;">feature_ts &le; spine_ts</code> and <code
+              style="color:#34D399;">patient_id matches</code>. Future features are <strong
+              style="color:#EF4444;">never</strong> included.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE: OFFLINE vs ONLINE — HORIZONTAL FLOW ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#9889; Serving</span>
+        <h2>Offline vs. Online <span class="accent">Feature Serving</span></h2>
+        <p class="subtitle">One Feature View definition, two serving paths. The <strong style="color:white;">offline
+            store</strong> retains full history for training; the <strong style="color:white;">online store</strong>
+          keeps only the latest values for low-latency inference.</p>
+
+        <svg width="100%" viewBox="0 0 920 290" fill="none" xmlns="http://www.w3.org/2000/svg"
+          style="display:block;margin-top:8px;">
+          <defs>
+            <marker id="arrowFl" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <path d="M0 0L8 3L0 6" fill="none" stroke="rgba(41,181,232,0.7)" stroke-width="1.2" />
+            </marker>
+            <marker id="arrowFlP" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <path d="M0 0L8 3L0 6" fill="none" stroke="rgba(139,92,246,0.7)" stroke-width="1.2" />
+            </marker>
+            <marker id="arrowFlG" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <path d="M0 0L8 3L0 6" fill="none" stroke="rgba(16,185,129,0.7)" stroke-width="1.2" />
+            </marker>
+          </defs>
+
+          <rect x="15" y="95" width="120" height="80" rx="12" fill="rgba(41,181,232,0.08)"
+            stroke="rgba(41,181,232,0.35)" stroke-width="1.5" />
+          <text x="75" y="125" fill="#56C4EC" font-size="10" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">Data Sources</text>
+          <text x="75" y="143" fill="rgba(255,255,255,0.4)" font-size="7.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">EHR, Labs, Claims</text>
+          <text x="75" y="157" fill="rgba(255,255,255,0.3)" font-size="7" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Snowflake Tables</text>
+
+          <path d="M140 135 L185 135" stroke="rgba(41,181,232,0.5)" stroke-width="2" marker-end="url(#arrowFl)" />
+
+          <rect x="195" y="82" width="150" height="106" rx="12" fill="rgba(16,185,129,0.06)"
+            stroke="rgba(16,185,129,0.5)" stroke-width="1.8" />
+          <text x="270" y="108" fill="#34D399" font-size="10.5" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="800">Feature View</text>
+          <text x="270" y="125" fill="rgba(255,255,255,0.5)" font-size="7.5" text-anchor="middle"
+            font-family="JetBrains Mono">Snowpark transformation</text>
+          <text x="270" y="143" fill="rgba(255,255,255,0.4)" font-size="7.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">+ Dynamic Table</text>
+          <rect x="215" y="153" width="110" height="20" rx="6" fill="rgba(16,185,129,0.15)"
+            stroke="rgba(16,185,129,0.3)" stroke-width="1" />
+          <text x="270" y="167" fill="#34D399" font-size="7" text-anchor="middle" font-family="JetBrains Mono"
+            font-weight="600">AUTO-REFRESH &#9679;</text>
+
+          <text x="270" y="10" fill="rgba(16,185,129,0.6)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans" font-weight="700" letter-spacing="1">SINGLE DEFINITION &rarr; ZERO
+            SKEW</text>
+
+          <path d="M350 115 L425 70" stroke="rgba(41,181,232,0.5)" stroke-width="2" marker-end="url(#arrowFl)" />
+          <path d="M350 155 L425 200" stroke="rgba(139,92,246,0.5)" stroke-width="2" marker-end="url(#arrowFlP)" />
+
+          <text x="373" y="78" fill="rgba(41,181,232,0.6)" font-size="7" font-family="Plus Jakarta Sans"
+            font-weight="600">full history</text>
+          <text x="373" y="175" fill="rgba(139,92,246,0.6)" font-size="7" font-family="Plus Jakarta Sans"
+            font-weight="600">latest only</text>
+
+          <rect x="430" y="25" width="160" height="80" rx="12" fill="rgba(41,181,232,0.08)"
+            stroke="rgba(41,181,232,0.4)" stroke-width="1.8" />
+          <text x="510" y="50" fill="#56C4EC" font-size="11" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="800">OFFLINE STORE</text>
+          <text x="510" y="68" fill="rgba(255,255,255,0.5)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Dynamic Table</text>
+          <text x="510" y="84" fill="rgba(255,255,255,0.4)" font-size="7.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Full history &middot; Seconds latency</text>
+          <text x="510" y="98" fill="rgba(41,181,232,0.5)" font-size="7" text-anchor="middle"
+            font-family="JetBrains Mono">generate_dataset()</text>
+
+          <rect x="430" y="165" width="160" height="80" rx="12" fill="rgba(139,92,246,0.08)"
+            stroke="rgba(139,92,246,0.4)" stroke-width="1.8" />
+          <text x="510" y="190" fill="#A78BFA" font-size="11" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="800">ONLINE STORE</text>
+          <text x="510" y="208" fill="rgba(255,255,255,0.5)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Hybrid Table</text>
+          <text x="510" y="224" fill="rgba(255,255,255,0.4)" font-size="7.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Latest values &middot; ~30ms latency</text>
+          <text x="510" y="238" fill="rgba(139,92,246,0.5)" font-size="7" text-anchor="middle"
+            font-family="JetBrains Mono">retrieve_feature_values()</text>
+
+          <path d="M595 65 L660 65" stroke="rgba(41,181,232,0.5)" stroke-width="2" marker-end="url(#arrowFl)" />
+          <path d="M595 205 L660 205" stroke="rgba(139,92,246,0.5)" stroke-width="2" marker-end="url(#arrowFlP)" />
+
+          <rect x="668" y="30" width="115" height="65" rx="10" fill="rgba(245,158,11,0.08)"
+            stroke="rgba(245,158,11,0.3)" stroke-width="1.5" />
+          <text x="725" y="55" fill="#FBBF24" font-size="9" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">Training Dataset</text>
+          <text x="725" y="70" fill="rgba(255,255,255,0.4)" font-size="7" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Versioned &middot; Immutable</text>
+          <text x="725" y="84" fill="rgba(255,255,255,0.3)" font-size="6.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Point-in-time correct</text>
+
+          <rect x="668" y="170" width="115" height="65" rx="10" fill="rgba(236,72,153,0.08)"
+            stroke="rgba(236,72,153,0.3)" stroke-width="1.5" />
+          <text x="725" y="195" fill="#F472B6" font-size="9" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">Feature Vector</text>
+          <text x="725" y="210" fill="rgba(255,255,255,0.4)" font-size="7" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Single-entity lookup</text>
+          <text x="725" y="224" fill="rgba(255,255,255,0.3)" font-size="6.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Up-to-date values</text>
+
+          <path d="M788 62 L830 62" stroke="rgba(16,185,129,0.5)" stroke-width="2" marker-end="url(#arrowFlG)" />
+          <path d="M788 202 L830 202" stroke="rgba(16,185,129,0.5)" stroke-width="2" marker-end="url(#arrowFlG)" />
+
+          <rect x="838" y="35" width="70" height="55" rx="10" fill="rgba(16,185,129,0.1)" stroke="rgba(16,185,129,0.5)"
+            stroke-width="2" />
+          <text x="873" y="57" fill="#34D399" font-size="8.5" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="800">MODEL</text>
+          <text x="873" y="72" fill="rgba(255,255,255,0.4)" font-size="7" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Train</text>
+          <text x="873" y="84" fill="rgba(255,255,255,0.3)" font-size="6.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">model.fit()</text>
+
+          <rect x="838" y="175" width="70" height="55" rx="10" fill="rgba(16,185,129,0.1)" stroke="rgba(16,185,129,0.5)"
+            stroke-width="2" />
+          <text x="873" y="197" fill="#34D399" font-size="8.5" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="800">MODEL</text>
+          <text x="873" y="212" fill="rgba(255,255,255,0.4)" font-size="7" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Predict</text>
+          <text x="873" y="224" fill="rgba(255,255,255,0.3)" font-size="6.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">~30ms</text>
+
+          <rect x="432" y="115" width="155" height="18" rx="9" fill="rgba(41,181,232,0.06)"
+            stroke="rgba(41,181,232,0.15)" stroke-width="1" />
+          <text x="509" y="128" fill="rgba(41,181,232,0.6)" font-size="6.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans" font-weight="600">BATCH &middot; REPRODUCIBLE</text>
+
+          <rect x="432" y="250" width="155" height="18" rx="9" fill="rgba(139,92,246,0.06)"
+            stroke="rgba(139,92,246,0.15)" stroke-width="1" />
+          <text x="509" y="263" fill="rgba(139,92,246,0.6)" font-size="6.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans" font-weight="600">LOW-LATENCY &middot; FRESH</text>
+        </svg>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;">
+          <div
+            style="padding:12px 16px;border-radius:10px;background:rgba(41,181,232,0.04);border:1px solid rgba(41,181,232,0.15);">
+            <div style="font-size:0.72em;font-weight:700;color:#56C4EC;margin-bottom:4px;">Offline Store = Dynamic Table
+            </div>
+            <p style="font-size:0.76em;color:rgba(255,255,255,0.55);line-height:1.55;">Stores <strong
+                style="color:white;">complete feature history</strong>. Used for building <em>training datasets</em>
+              with point-in-time correctness. Latency is seconds &mdash; acceptable for batch workloads.</p>
+          </div>
+          <div
+            style="padding:12px 16px;border-radius:10px;background:rgba(139,92,246,0.04);border:1px solid rgba(139,92,246,0.15);">
+            <div style="font-size:0.72em;font-weight:700;color:#A78BFA;margin-bottom:4px;">Online Store = Hybrid Table
+            </div>
+            <p style="font-size:0.76em;color:rgba(255,255,255,0.55);line-height:1.55;">Stores only the <strong
+                style="color:white;">latest feature values</strong> per entity. Optimized for <em>single-key
+                lookups</em> at ~30ms &mdash; fast enough for real-time inference behind an API.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE: FEATURE STORE CODE ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128187; Code</span>
+        <h2>Feature Store <span class="accent">in Action</span></h2>
+
+        <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:18px;flex:1;min-height:0;margin-top:16px;">
+          <div style="display:flex;flex-direction:column;gap:12px;overflow-y:auto;">
+            <div
+              style="padding:18px;border-radius:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
+              <div
+                style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-blue);margin-bottom:12px;">
+                Key Concepts</div>
+              <div style="display:flex;flex-direction:column;gap:10px;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span
+                    style="width:28px;height:28px;border-radius:8px;background:rgba(41,181,232,0.12);display:flex;align-items:center;justify-content:center;font-size:0.8em;">&#128218;</span>
+                  <div>
+                    <div style="font-size:0.82em;font-weight:700;color:white;">FeatureStore</div>
+                    <div style="font-size:0.7em;color:rgba(255,255,255,0.45);">= a Snowflake schema. No external infra.
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span
+                    style="width:28px;height:28px;border-radius:8px;background:rgba(245,158,11,0.12);display:flex;align-items:center;justify-content:center;font-size:0.8em;">&#128204;</span>
+                  <div>
+                    <div style="font-size:0.82em;font-weight:700;color:white;">Entity</div>
+                    <div style="font-size:0.7em;color:rgba(255,255,255,0.45);">Join key linking features across views.
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span
+                    style="width:28px;height:28px;border-radius:8px;background:rgba(16,185,129,0.12);display:flex;align-items:center;justify-content:center;font-size:0.8em;">&#128065;</span>
+                  <div>
+                    <div style="font-size:0.82em;font-weight:700;color:white;">FeatureView</div>
+                    <div style="font-size:0.7em;color:rgba(255,255,255,0.45);">Transformation + Dynamic Table
+                      auto-refresh.</div>
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span
+                    style="width:28px;height:28px;border-radius:8px;background:rgba(139,92,246,0.12);display:flex;align-items:center;justify-content:center;font-size:0.8em;">&#128451;</span>
+                  <div>
+                    <div style="font-size:0.82em;font-weight:700;color:white;">Dataset</div>
+                    <div style="font-size:0.7em;color:rgba(255,255,255,0.45);">Immutable, versioned, point-in-time
+                      snapshot.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div
+              style="padding:14px 18px;border-radius:12px;background:rgba(16,185,129,0.04);border:1px solid rgba(16,185,129,0.15);">
+              <div
+                style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-green);margin-bottom:6px;">
+                Zero Training-Serving Skew</div>
+              <p style="font-size:0.76em;color:rgba(255,255,255,0.55);line-height:1.6;">Same Feature View serves both
+                <strong style="color:white;">generate_dataset()</strong> at training and <strong
+                  style="color:white;">retrieve_feature_values()</strong> at inference.</p>
+            </div>
+          </div>
+
+          <div
+            style="padding:20px;border-radius:12px;background:rgba(0,0,0,0.3);border:1px solid rgba(41,181,232,0.15);overflow-y:auto;font-family:'JetBrains Mono','Fira Code',monospace;">
+            <div
+              style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-blue);margin-bottom:14px;">
+              feature_store_setup.py</div>
+            <pre style="font-size:0.72em;line-height:1.7;color:rgba(255,255,255,0.85);white-space:pre-wrap;margin:0;"><span style="color:rgba(255,255,255,0.35);"># Initialize Feature Store (just a schema)</span>
+<span style="color:#C792EA;">from</span> snowflake.ml.feature_store <span style="color:#C792EA;">import</span> (
+    <span style="color:#FFCB6B;">FeatureStore</span>, <span style="color:#FFCB6B;">FeatureView</span>, <span style="color:#FFCB6B;">Entity</span>, <span style="color:#FFCB6B;">CreationMode</span>
+)
+
+fs = <span style="color:#FFCB6B;">FeatureStore</span>(session, database=<span style="color:#C3E88D;">"ML_DB"</span>,
+    name=<span style="color:#C3E88D;">"HEALTHCARE"</span>,
+    default_warehouse=<span style="color:#C3E88D;">"ML_WH"</span>,
+    creation_mode=<span style="color:#FFCB6B;">CreationMode</span>.CREATE_IF_NOT_EXIST)
+
+<span style="color:rgba(255,255,255,0.35);"># Register entity (join key for all features)</span>
+patient = <span style="color:#FFCB6B;">Entity</span>(<span style="color:#C3E88D;">"PATIENT"</span>, join_keys=[<span style="color:#C3E88D;">"PATIENT_ID"</span>])
+fs.register_entity(patient)
+
+<span style="color:rgba(255,255,255,0.35);"># Engineer features with Snowpark (server-side)</span>
+feature_df = raw_df.with_column(<span style="color:#C3E88D;">"SHOCK_INDEX"</span>,
+    F.col(<span style="color:#C3E88D;">"HEART_RATE"</span>) / F.col(<span style="color:#C3E88D;">"SYSTOLIC_BP"</span>)
+).with_column(<span style="color:#C3E88D;">"PULSE_PRESSURE"</span>,
+    F.col(<span style="color:#C3E88D;">"SYSTOLIC_BP"</span>) - F.col(<span style="color:#C3E88D;">"DIASTOLIC_BP"</span>))
+
+<span style="color:rgba(255,255,255,0.35);"># Register Feature View (creates Dynamic Table)</span>
+fv = <span style="color:#FFCB6B;">FeatureView</span>(<span style="color:#C3E88D;">"PATIENT_FEATURES"</span>, [patient],
+    feature_df, refresh_freq=<span style="color:#C3E88D;">"1 minute"</span>,
+    timestamp_col=<span style="color:#C3E88D;">"TIMESTAMP"</span>)
+fs.register_feature_view(fv, version=<span style="color:#C3E88D;">"v1"</span>, block=<span style="color:#C792EA;">True</span>)
+
+<span style="color:rgba(255,255,255,0.35);"># Generate point-in-time training dataset</span>
+dataset = fs.generate_dataset(
+    spine_df=spine, features=[fv],
+    spine_timestamp_col=<span style="color:#C3E88D;">"TIMESTAMP"</span>,
+    name=<span style="color:#C3E88D;">"PATIENT_RISK_DS"</span>, version=<span style="color:#C3E88D;">"v1"</span>)</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE 8: SECTION — EXPERIMENT TRACKING ==================== -->
+    <div class="slide slide-section">
+      <div style="position:relative;">
+        <h2>Part 2<br><span style="color:var(--sf-purple);">Experiment Tracking</span></h2>
+        <p class="section-sub">Log runs, compare metrics, select winners &mdash; no external tracking server.</p>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE 9: EXPERIMENT TRACKING OVERVIEW ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128300; Experiments</span>
+        <h2>Experiment Tracking <span class="accent-purple">Overview</span></h2>
+        <p class="subtitle">Native experiment tracking stored as Snowflake metadata &mdash; governed by the same RBAC as
+          your data.</p>
+
+        <svg width="100%" viewBox="0 0 880 300" fill="none" xmlns="http://www.w3.org/2000/svg"
+          style="display:block;margin-top:8px;">
+          <defs>
+            <marker id="arrowEX" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <path d="M0 0L8 3L0 6" fill="none" stroke="rgba(139,92,246,0.7)" stroke-width="1.2" />
+            </marker>
+          </defs>
+
+          <!-- Dataset input -->
+          <rect x="30" y="100" width="150" height="70" rx="10" fill="rgba(41,181,232,0.06)"
+            stroke="rgba(41,181,232,0.3)" stroke-width="1.5" />
+          <text x="105" y="125" fill="#56C4EC" font-size="10" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">Versioned Dataset</text>
+          <text x="105" y="143" fill="rgba(255,255,255,0.5)" font-size="8.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">PATIENT_RISK_DS/v1</text>
+          <text x="105" y="160" fill="rgba(255,255,255,0.35)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Point-in-time correct</text>
+
+          <path d="M185 135 L240 135" stroke="rgba(139,92,246,0.5)" stroke-width="1.5" marker-end="url(#arrowEX)" />
+
+          <!-- Experiment container -->
+          <rect x="250" y="30" width="380" height="240" rx="14" fill="rgba(139,92,246,0.03)"
+            stroke="rgba(139,92,246,0.25)" stroke-width="1.8" />
+          <rect x="350" y="20" width="180" height="22" rx="11" fill="#091E33" stroke="rgba(139,92,246,0.5)"
+            stroke-width="1.2" />
+          <text x="440" y="35" fill="#A78BFA" font-size="8.5" font-family="Plus Jakarta Sans" font-weight="700"
+            text-anchor="middle" letter-spacing="1">PATIENT_RISK_EXPERIMENT</text>
+
+          <!-- Run 1 - Baseline -->
+          <rect x="275" y="55" width="160" height="55" rx="8" fill="rgba(41,181,232,0.08)" stroke="rgba(41,181,232,0.3)"
+            stroke-width="1" />
+          <text x="355" y="73" fill="#56C4EC" font-size="9" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">Run 1: Baseline</text>
+          <text x="355" y="88" fill="rgba(255,255,255,0.5)" font-size="8" text-anchor="middle"
+            font-family="JetBrains Mono">RF n=100</text>
+          <text x="355" y="103" fill="rgba(255,255,255,0.4)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">F1: 0.82</text>
+
+          <!-- Run 2 -->
+          <rect x="450" y="55" width="160" height="55" rx="8" fill="rgba(139,92,246,0.08)"
+            stroke="rgba(139,92,246,0.25)" stroke-width="1" />
+          <text x="530" y="73" fill="#A78BFA" font-size="9" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">Run 2: More Trees</text>
+          <text x="530" y="88" fill="rgba(255,255,255,0.5)" font-size="8" text-anchor="middle"
+            font-family="JetBrains Mono">RF n=300, depth=15</text>
+          <text x="530" y="103" fill="rgba(255,255,255,0.4)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">F1: 0.85</text>
+
+          <!-- Run 3 -->
+          <rect x="275" y="125" width="160" height="55" rx="8" fill="rgba(245,158,11,0.08)"
+            stroke="rgba(245,158,11,0.25)" stroke-width="1" />
+          <text x="355" y="143" fill="#FBBF24" font-size="9" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">Run 3: Leaf Constraint</text>
+          <text x="355" y="158" fill="rgba(255,255,255,0.5)" font-size="8" text-anchor="middle"
+            font-family="JetBrains Mono">RF n=500, leaf=5</text>
+          <text x="355" y="173" fill="rgba(255,255,255,0.4)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">F1: 0.84</text>
+
+          <!-- Run 4 - Winner -->
+          <rect x="450" y="125" width="160" height="55" rx="8" fill="rgba(16,185,129,0.1)" stroke="rgba(16,185,129,0.5)"
+            stroke-width="2" />
+          <text x="530" y="143" fill="#34D399" font-size="9" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">Run 4: GradientBoost</text>
+          <text x="530" y="158" fill="rgba(255,255,255,0.5)" font-size="8" text-anchor="middle"
+            font-family="JetBrains Mono">GBC n=200, lr=0.1</text>
+          <text x="530" y="173" fill="var(--sf-green)" font-size="8.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans" font-weight="700">F1: 0.87 &#9733; BEST</text>
+
+          <!-- Comparison arrow -->
+          <rect x="310" y="200" width="240" height="50" rx="10" fill="rgba(255,255,255,0.03)"
+            stroke="rgba(255,255,255,0.1)" stroke-width="1" />
+          <text x="430" y="220" fill="rgba(255,255,255,0.6)" font-size="9" text-anchor="middle"
+            font-family="Plus Jakarta Sans" font-weight="600">SHOW RUNS IN EXPERIMENT</text>
+          <text x="430" y="238" fill="rgba(255,255,255,0.35)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Query &amp; compare via SQL or Python</text>
+
+          <!-- Output: Best model -->
+          <path d="M635 150 L700 150" stroke="rgba(16,185,129,0.5)" stroke-width="1.8" marker-end="url(#arrowEX)" />
+          <rect x="710" y="115" width="150" height="70" rx="10" fill="rgba(16,185,129,0.06)"
+            stroke="rgba(16,185,129,0.3)" stroke-width="1.5" />
+          <text x="785" y="140" fill="#34D399" font-size="10" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">Best Model</text>
+          <text x="785" y="158" fill="rgba(255,255,255,0.5)" font-size="8.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">GradientBoosting</text>
+          <text x="785" y="175" fill="rgba(255,255,255,0.4)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">&rarr; Model Registry</text>
+        </svg>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE 10: EXPERIMENT TRACKING CODE ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128187; Code</span>
+        <h2>Experiment Tracking <span class="accent-purple">in Action</span></h2>
+
+        <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:18px;flex:1;min-height:0;margin-top:16px;">
+          <!-- LEFT -->
+          <div style="display:flex;flex-direction:column;gap:12px;overflow-y:auto;">
+            <div
+              style="padding:18px;border-radius:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
+              <div
+                style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-purple);margin-bottom:12px;">
+                API Methods</div>
+              <div style="display:flex;flex-direction:column;gap:8px;font-size:0.78em;">
+                <div style="display:flex;gap:8px;"><code
+                    style="color:#A78BFA;font-family:'JetBrains Mono';font-size:0.9em;">set_experiment()</code><span
+                    style="color:rgba(255,255,255,0.45);">Create/connect</span></div>
+                <div style="display:flex;gap:8px;"><code
+                    style="color:#A78BFA;font-family:'JetBrains Mono';font-size:0.9em;">start_run()</code><span
+                    style="color:rgba(255,255,255,0.45);">Context manager</span></div>
+                <div style="display:flex;gap:8px;"><code
+                    style="color:#A78BFA;font-family:'JetBrains Mono';font-size:0.9em;">log_params()</code><span
+                    style="color:rgba(255,255,255,0.45);">Hyperparameters</span></div>
+                <div style="display:flex;gap:8px;"><code
+                    style="color:#A78BFA;font-family:'JetBrains Mono';font-size:0.9em;">log_metrics()</code><span
+                    style="color:rgba(255,255,255,0.45);">Evaluation scores</span></div>
+                <div style="display:flex;gap:8px;"><code
+                    style="color:#A78BFA;font-family:'JetBrains Mono';font-size:0.9em;">log_model()</code><span
+                    style="color:rgba(255,255,255,0.45);">Wraps Registry</span></div>
+                <div style="display:flex;gap:8px;"><code
+                    style="color:#A78BFA;font-family:'JetBrains Mono';font-size:0.9em;">log_artifact()</code><span
+                    style="color:rgba(255,255,255,0.45);">Files/dirs</span></div>
+              </div>
+            </div>
+            <div
+              style="padding:14px 18px;border-radius:12px;background:rgba(139,92,246,0.04);border:1px solid rgba(139,92,246,0.15);">
+              <div
+                style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#A78BFA;margin-bottom:6px;">
+                No Tracking Server</div>
+              <p style="font-size:0.76em;color:rgba(255,255,255,0.55);line-height:1.6;">Experiments stored as Snowflake
+                metadata. Same credentials, same RBAC, same Snowsight UI.</p>
+            </div>
+            <div
+              style="padding:14px 18px;border-radius:12px;background:rgba(16,185,129,0.04);border:1px solid rgba(16,185,129,0.15);">
+              <div
+                style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-green);margin-bottom:6px;">
+                View in Snowsight</div>
+              <p style="font-size:0.76em;color:rgba(255,255,255,0.55);line-height:1.6;"><strong style="color:white;">AI
+                  &amp; ML &rarr; Experiments</strong> for a visual comparison of all runs.</p>
+            </div>
+          </div>
+
+          <!-- RIGHT: Code -->
+          <div
+            style="padding:20px;border-radius:12px;background:rgba(0,0,0,0.3);border:1px solid rgba(139,92,246,0.15);overflow-y:auto;font-family:'JetBrains Mono','Fira Code',monospace;">
+            <div
+              style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-purple);margin-bottom:14px;">
+              experiment_tracking.py</div>
+            <pre style="font-size:0.72em;line-height:1.7;color:rgba(255,255,255,0.85);white-space:pre-wrap;margin:0;"><span style="color:rgba(255,255,255,0.35);"># Initialize experiment tracking</span>
+<span style="color:#C792EA;">from</span> snowflake.ml.experiment <span style="color:#C792EA;">import</span> <span style="color:#FFCB6B;">ExperimentTracking</span>
+
+exp = <span style="color:#FFCB6B;">ExperimentTracking</span>(session)
+exp.set_experiment(<span style="color:#C3E88D;">"PATIENT_RISK_EXPERIMENT"</span>,
+    database=db, schema=schema)
+
+<span style="color:rgba(255,255,255,0.35);"># Run 1: Baseline</span>
+<span style="color:#C792EA;">with</span> exp.start_run(run_name=<span style="color:#C3E88D;">"baseline_rf"</span>) <span style="color:#C792EA;">as</span> run:
+    run.log_params({
+        <span style="color:#C3E88D;">"model"</span>: <span style="color:#C3E88D;">"RandomForest"</span>,
+        <span style="color:#C3E88D;">"n_estimators"</span>: <span style="color:#F78C6C;">100</span>,
+        <span style="color:#C3E88D;">"class_weight"</span>: <span style="color:#C3E88D;">"balanced"</span>,
+    })
+    model = pipeline.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    run.log_metrics({
+        <span style="color:#C3E88D;">"accuracy"</span>: accuracy_score(y_test, preds),
+        <span style="color:#C3E88D;">"f1_weighted"</span>: f1_score(y_test, preds,
+            average=<span style="color:#C3E88D;">"weighted"</span>),
+    })
+
+<span style="color:rgba(255,255,255,0.35);"># Compare all runs</span>
+runs_df = session.sql(
+    <span style="color:#C3E88D;">f"SHOW RUNS IN EXPERIMENT {DB}.{SCHEMA}"</span>
+    <span style="color:#C3E88D;">f".PATIENT_RISK_EXPERIMENT"</span>
+).to_pandas()</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE 11: SECTION — MODEL REGISTRY ==================== -->
+    <div class="slide slide-section">
+      <div style="position:relative;">
+        <h2>Part 3<br><span style="color:var(--sf-green);">Model Registry</span></h2>
+        <p class="section-sub">Version, trace, tag, and promote models &mdash; all within Snowflake governance.</p>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE 12: MODEL REGISTRY ARCHITECTURE ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128230; Registry</span>
+        <h2>Model Registry <span class="accent-green">Architecture</span></h2>
+        <p class="subtitle">Models are first-class Snowflake objects with versioning, lineage, and RBAC built in.</p>
+
+        <svg width="100%" viewBox="0 0 880 320" fill="none" xmlns="http://www.w3.org/2000/svg"
+          style="display:block;margin-top:8px;">
+          <defs>
+            <marker id="arrowMR" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <path d="M0 0L8 3L0 6" fill="none" stroke="rgba(16,185,129,0.7)" stroke-width="1.2" />
+            </marker>
+          </defs>
+
+          <!-- Model object -->
+          <rect x="300" y="20" width="280" height="280" rx="16" fill="rgba(16,185,129,0.03)"
+            stroke="rgba(16,185,129,0.3)" stroke-width="2" />
+          <rect x="360" y="10" width="160" height="22" rx="11" fill="#091E33" stroke="rgba(16,185,129,0.5)"
+            stroke-width="1.2" />
+          <text x="440" y="25" fill="#34D399" font-size="9" font-family="Plus Jakarta Sans" font-weight="700"
+            text-anchor="middle" letter-spacing="1">PATIENT_RISK_MODEL</text>
+
+          <!-- Version v1 -->
+          <rect x="325" y="50" width="230" height="60" rx="10" fill="rgba(41,181,232,0.06)"
+            stroke="rgba(41,181,232,0.25)" stroke-width="1.2" />
+          <text x="345" y="70" fill="#56C4EC" font-size="9" font-family="Plus Jakarta Sans" font-weight="700">Version:
+            v1</text>
+          <text x="345" y="86" fill="rgba(255,255,255,0.5)" font-size="8" font-family="Plus Jakarta Sans">RandomForest
+            &middot; F1: 0.82</text>
+          <text x="345" y="100" fill="rgba(255,255,255,0.35)" font-size="7.5" font-family="Plus Jakarta Sans">metrics,
+            comment, sample_input</text>
+
+          <!-- Version v2 (default) -->
+          <rect x="325" y="120" width="230" height="65" rx="10" fill="rgba(16,185,129,0.08)"
+            stroke="rgba(16,185,129,0.5)" stroke-width="2" />
+          <text x="345" y="140" fill="#34D399" font-size="9" font-family="Plus Jakarta Sans" font-weight="700">Version:
+            v2 &#9733; DEFAULT</text>
+          <text x="345" y="156" fill="rgba(255,255,255,0.5)" font-size="8"
+            font-family="Plus Jakarta Sans">GradientBoosting &middot; F1: 0.87</text>
+          <text x="345" y="170" fill="rgba(255,255,255,0.35)" font-size="7.5" font-family="Plus Jakarta Sans">metrics,
+            comment, sample_input</text>
+          <rect x="490" y="130" width="55" height="18" rx="9" fill="rgba(16,185,129,0.2)" stroke="rgba(16,185,129,0.4)"
+            stroke-width="1" />
+          <text x="517" y="143" fill="#34D399" font-size="7" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">DEFAULT</text>
+
+          <!-- Tags -->
+          <rect x="325" y="200" width="230" height="45" rx="8" fill="rgba(245,158,11,0.05)"
+            stroke="rgba(245,158,11,0.2)" stroke-width="1" />
+          <text x="345" y="218" fill="#FBBF24" font-size="8.5" font-family="Plus Jakarta Sans" font-weight="700">Tags
+            &amp; Metadata</text>
+          <text x="345" y="235" fill="rgba(255,255,255,0.5)" font-size="8"
+            font-family="JetBrains Mono">task=CLASSIFICATION, team=DS</text>
+
+          <!-- Aliases -->
+          <rect x="325" y="255" width="230" height="35" rx="8" fill="rgba(139,92,246,0.05)"
+            stroke="rgba(139,92,246,0.2)" stroke-width="1" />
+          <text x="345" y="278" fill="#A78BFA" font-size="8.5" font-family="Plus Jakarta Sans"
+            font-weight="700">Aliases: champion, staging</text>
+
+          <!-- Lineage (left side) -->
+          <rect x="30" y="80" width="140" height="50" rx="8" fill="rgba(41,181,232,0.06)" stroke="rgba(41,181,232,0.2)"
+            stroke-width="1" />
+          <text x="100" y="102" fill="#56C4EC" font-size="9" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="600">RAW_PATIENT_DATA</text>
+          <text x="100" y="118" fill="rgba(255,255,255,0.35)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Source Table</text>
+
+          <rect x="30" y="145" width="140" height="50" rx="8" fill="rgba(16,185,129,0.06)" stroke="rgba(16,185,129,0.2)"
+            stroke-width="1" />
+          <text x="100" y="167" fill="#34D399" font-size="9" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="600">PATIENT_FEATURES</text>
+          <text x="100" y="183" fill="rgba(255,255,255,0.35)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Feature View</text>
+
+          <rect x="30" y="210" width="140" height="50" rx="8" fill="rgba(139,92,246,0.06)" stroke="rgba(139,92,246,0.2)"
+            stroke-width="1" />
+          <text x="100" y="232" fill="#A78BFA" font-size="9" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="600">PATIENT_RISK_DS</text>
+          <text x="100" y="248" fill="rgba(255,255,255,0.35)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Dataset</text>
+
+          <!-- Lineage arrows -->
+          <path d="M100 130 L100 143" stroke="rgba(255,255,255,0.2)" stroke-width="1.2" stroke-dasharray="3 3" />
+          <path d="M100 195 L100 208" stroke="rgba(255,255,255,0.2)" stroke-width="1.2" stroke-dasharray="3 3" />
+          <path d="M172 235 L320 165" stroke="rgba(16,185,129,0.4)" stroke-width="1.5" marker-end="url(#arrowMR)"
+            stroke-dasharray="5 3" />
+
+          <!-- Lineage label -->
+          <text x="100" y="65" fill="rgba(255,255,255,0.4)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans" font-weight="700" letter-spacing="1">AUTOMATIC LINEAGE</text>
+
+          <!-- Right side: Outputs -->
+          <path d="M585 150 L650 100" stroke="rgba(16,185,129,0.4)" stroke-width="1.5" marker-end="url(#arrowMR)" />
+          <path d="M585 150 L650 200" stroke="rgba(16,185,129,0.4)" stroke-width="1.5" marker-end="url(#arrowMR)" />
+
+          <rect x="660" y="75" width="180" height="50" rx="10" fill="rgba(245,158,11,0.06)"
+            stroke="rgba(245,158,11,0.2)" stroke-width="1.2" />
+          <text x="750" y="97" fill="#FBBF24" font-size="9.5" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">Warehouse Inference</text>
+          <text x="750" y="115" fill="rgba(255,255,255,0.4)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">model.run(df, "predict")</text>
+
+          <rect x="660" y="175" width="180" height="50" rx="10" fill="rgba(236,72,153,0.06)"
+            stroke="rgba(236,72,153,0.2)" stroke-width="1.2" />
+          <text x="750" y="197" fill="#F472B6" font-size="9.5" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">SPCS REST Service</text>
+          <text x="750" y="215" fill="rgba(255,255,255,0.4)" font-size="8" text-anchor="middle"
+            font-family="Plus Jakarta Sans">mv.create_service(...)</text>
+        </svg>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE 13: MODEL REGISTRY CODE ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128187; Code</span>
+        <h2>Model Registry <span class="accent-green">in Action</span></h2>
+
+        <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:18px;flex:1;min-height:0;margin-top:16px;">
+          <!-- LEFT -->
+          <div style="display:flex;flex-direction:column;gap:12px;overflow-y:auto;">
+            <div
+              style="padding:18px;border-radius:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
+              <div
+                style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-green);margin-bottom:12px;">
+                Registry Capabilities</div>
+              <div style="display:flex;flex-direction:column;gap:8px;font-size:0.78em;">
+                <div style="display:flex;gap:8px;align-items:center;"><span
+                    style="color:var(--sf-green);">&#10003;</span><span style="color:rgba(255,255,255,0.6);">Named
+                    versions (semantic versioning)</span></div>
+                <div style="display:flex;gap:8px;align-items:center;"><span
+                    style="color:var(--sf-green);">&#10003;</span><span style="color:rgba(255,255,255,0.6);">Default
+                    version abstraction</span></div>
+                <div style="display:flex;gap:8px;align-items:center;"><span
+                    style="color:var(--sf-green);">&#10003;</span><span style="color:rgba(255,255,255,0.6);">Metrics
+                    attached to version</span></div>
+                <div style="display:flex;gap:8px;align-items:center;"><span
+                    style="color:var(--sf-green);">&#10003;</span><span style="color:rgba(255,255,255,0.6);">Automatic
+                    upstream lineage</span></div>
+                <div style="display:flex;gap:8px;align-items:center;"><span
+                    style="color:var(--sf-green);">&#10003;</span><span style="color:rgba(255,255,255,0.6);">Tags for
+                    team/domain/task</span></div>
+                <div style="display:flex;gap:8px;align-items:center;"><span
+                    style="color:var(--sf-green);">&#10003;</span><span style="color:rgba(255,255,255,0.6);">Warehouse
+                    or SPCS inference</span></div>
+                <div style="display:flex;gap:8px;align-items:center;"><span
+                    style="color:var(--sf-green);">&#10003;</span><span style="color:rgba(255,255,255,0.6);">Built-in
+                    explain() for SHAP</span></div>
+              </div>
+            </div>
+            <div
+              style="padding:14px 18px;border-radius:12px;background:rgba(16,185,129,0.04);border:1px solid rgba(16,185,129,0.15);">
+              <div
+                style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-green);margin-bottom:6px;">
+                Promotion Workflow</div>
+              <p style="font-size:0.76em;color:rgba(255,255,255,0.55);line-height:1.6;">Check metrics against thresholds
+                &rarr; set as default &rarr; deploy to service. Bad models never reach production.</p>
+            </div>
+          </div>
+
+          <!-- RIGHT: Code -->
+          <div
+            style="padding:20px;border-radius:12px;background:rgba(0,0,0,0.3);border:1px solid rgba(16,185,129,0.15);overflow-y:auto;font-family:'JetBrains Mono','Fira Code',monospace;">
+            <div
+              style="font-size:0.68em;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--sf-green);margin-bottom:14px;">
+              model_registry.py</div>
+            <pre style="font-size:0.72em;line-height:1.7;color:rgba(255,255,255,0.85);white-space:pre-wrap;margin:0;"><span style="color:rgba(255,255,255,0.35);"># Register model in the Snowflake Model Registry</span>
+<span style="color:#C792EA;">from</span> snowflake.ml.registry <span style="color:#C792EA;">import</span> <span style="color:#FFCB6B;">Registry</span>
+<span style="color:#C792EA;">from</span> snowflake.ml.model.task <span style="color:#C792EA;">import</span> <span style="color:#FFCB6B;">Task</span>
+
+registry = <span style="color:#FFCB6B;">Registry</span>(session, database_name=db,
+    schema_name=schema)
+
+<span style="color:rgba(255,255,255,0.35);"># One call: serialize, store, capture lineage</span>
+mv = registry.log_model(
+    model=best_pipeline,
+    model_name=<span style="color:#C3E88D;">"PATIENT_RISK_MODEL"</span>,
+    version_name=<span style="color:#C3E88D;">"v2"</span>,
+    sample_input_data=X_train.head(<span style="color:#F78C6C;">10</span>),
+    metrics={<span style="color:#C3E88D;">"f1"</span>: <span style="color:#F78C6C;">0.87</span>, <span style="color:#C3E88D;">"accuracy"</span>: <span style="color:#F78C6C;">0.89</span>},
+    task=<span style="color:#FFCB6B;">Task</span>.TABULAR_MULTI_CLASSIFICATION,
+    comment=<span style="color:#C3E88D;">"GradientBoosting with tuned LR"</span>,
+)
+
+<span style="color:rgba(255,255,255,0.35);"># Tag the model for discoverability</span>
+mv.set_tag(<span style="color:#C3E88D;">"team"</span>, <span style="color:#C3E88D;">"clinical_ds"</span>)
+mv.set_tag(<span style="color:#C3E88D;">"domain"</span>, <span style="color:#C3E88D;">"patient_risk"</span>)
+
+<span style="color:rgba(255,255,255,0.35);"># Promotion: set as default if thresholds pass</span>
+model_ref = registry.get_model(<span style="color:#C3E88D;">"PATIENT_RISK_MODEL"</span>)
+<span style="color:#C792EA;">if</span> mv.get_metrics()[<span style="color:#C3E88D;">"f1"</span>] >= <span style="color:#F78C6C;">0.75</span>:
+    model_ref.default = <span style="color:#C3E88D;">"v2"</span>
+
+<span style="color:rgba(255,255,255,0.35);"># View lineage in Snowsight: AI & ML > Models</span>
+lineage = mv.lineage()  <span style="color:rgba(255,255,255,0.35);"># upstream provenance</span></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE 14: LINEAGE DEEP DIVE ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128279; Lineage</span>
+        <h2>End-to-End <span class="accent">Lineage</span></h2>
+        <p class="subtitle">Automatically captured &mdash; from source table to production predictions. No manual
+          annotation.</p>
+
+        <svg width="100%" viewBox="0 0 860 240" fill="none" xmlns="http://www.w3.org/2000/svg"
+          style="display:block;margin-top:20px;">
+          <defs>
+            <marker id="arrowLN" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <path d="M0 0L8 3L0 6" fill="none" stroke="rgba(41,181,232,0.6)" stroke-width="1.2" />
+            </marker>
+          </defs>
+
+          <!-- Node 1: Source Table -->
+          <rect x="20" y="80" width="140" height="80" rx="12" fill="rgba(41,181,232,0.08)" stroke="rgba(41,181,232,0.4)"
+            stroke-width="1.8" />
+          <text x="90" y="108" fill="rgba(255,255,255,0.4)" font-size="16" text-anchor="middle">&#128451;</text>
+          <text x="90" y="128" fill="#56C4EC" font-size="10" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">RAW_PATIENT_DATA</text>
+          <text x="90" y="146" fill="rgba(255,255,255,0.4)" font-size="8.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Source Table</text>
+
+          <!-- Arrow -->
+          <path d="M165 120 L210 120" stroke="rgba(41,181,232,0.5)" stroke-width="2" marker-end="url(#arrowLN)" />
+
+          <!-- Node 2: Feature View -->
+          <rect x="220" y="80" width="155" height="80" rx="12" fill="rgba(16,185,129,0.08)"
+            stroke="rgba(16,185,129,0.4)" stroke-width="1.8" />
+          <text x="297" y="108" fill="rgba(255,255,255,0.4)" font-size="16" text-anchor="middle">&#128065;</text>
+          <text x="297" y="128" fill="#34D399" font-size="10" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">PATIENT_FEATURES/v1</text>
+          <text x="297" y="146" fill="rgba(255,255,255,0.4)" font-size="8.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Feature View (DT)</text>
+
+          <!-- Arrow -->
+          <path d="M380 120 L425 120" stroke="rgba(41,181,232,0.5)" stroke-width="2" marker-end="url(#arrowLN)" />
+
+          <!-- Node 3: Dataset -->
+          <rect x="435" y="80" width="155" height="80" rx="12" fill="rgba(139,92,246,0.08)"
+            stroke="rgba(139,92,246,0.4)" stroke-width="1.8" />
+          <text x="512" y="108" fill="rgba(255,255,255,0.4)" font-size="16" text-anchor="middle">&#128202;</text>
+          <text x="512" y="128" fill="#A78BFA" font-size="10" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">PATIENT_RISK_DS/v1</text>
+          <text x="512" y="146" fill="rgba(255,255,255,0.4)" font-size="8.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Immutable Dataset</text>
+
+          <!-- Arrow -->
+          <path d="M595 120 L640 120" stroke="rgba(41,181,232,0.5)" stroke-width="2" marker-end="url(#arrowLN)" />
+
+          <!-- Node 4: Model -->
+          <rect x="650" y="80" width="185" height="80" rx="12" fill="rgba(16,185,129,0.1)" stroke="rgba(16,185,129,0.5)"
+            stroke-width="2" />
+          <text x="742" y="108" fill="rgba(255,255,255,0.4)" font-size="16" text-anchor="middle">&#129302;</text>
+          <text x="742" y="128" fill="#34D399" font-size="10" text-anchor="middle" font-family="Plus Jakarta Sans"
+            font-weight="700">PATIENT_RISK_MODEL/v2</text>
+          <text x="742" y="146" fill="rgba(255,255,255,0.4)" font-size="8.5" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Model Registry</text>
+
+          <!-- Bottom notes -->
+          <text x="430" y="200" fill="rgba(255,255,255,0.5)" font-size="10" text-anchor="middle"
+            font-family="Plus Jakarta Sans">Captured automatically via <tspan fill="var(--sf-blue)" font-weight="700">
+              sample_input_data</tspan> in log_model() &mdash; no manual annotation needed.</text>
+          <text x="430" y="220" fill="rgba(255,255,255,0.35)" font-size="9" text-anchor="middle"
+            font-family="Plus Jakarta Sans">View in Snowsight &rarr; AI &amp; ML &rarr; Models &rarr; Lineage tab</text>
+        </svg>
+      </div>
+    </div>
+
+    <!-- ==================== SLIDE 15: SUMMARY ==================== -->
+    <div class="slide slide-dark">
+      <div class="slide-inner">
+        <span class="tag">&#128218; Recap</span>
+        <h2>Session 2 <span class="accent">Summary</span></h2>
+        <p class="subtitle">Everything we covered today &mdash; all native to Snowflake, no external tools required.</p>
+
+        <div class="cards c3" style="margin-top:16px;">
+          <div class="card" style="border-top:3px solid var(--sf-blue);">
+            <div class="card-icon blue">&#129516;</div>
+            <h3>Feature Store</h3>
+            <ul>
+              <li>Feature Store = Snowflake schema</li>
+              <li>Dynamic Tables auto-refresh</li>
+              <li>Point-in-time correctness</li>
+              <li>Online (Hybrid) + Offline (DT)</li>
+              <li>Immutable dataset versions</li>
+              <li>Zero training-serving skew</li>
+            </ul>
+          </div>
+          <div class="card" style="border-top:3px solid var(--sf-purple);">
+            <div class="card-icon purple">&#128300;</div>
+            <h3>Experiment Tracking</h3>
+            <ul>
+              <li>No external tracking server</li>
+              <li>Log params, metrics, artifacts</li>
+              <li>Compare runs via SQL</li>
+              <li>View in Snowsight UI</li>
+              <li>Same RBAC as your data</li>
+              <li>Select best run programmatically</li>
+            </ul>
+          </div>
+          <div class="card" style="border-top:3px solid var(--sf-green);">
+            <div class="card-icon green">&#128230;</div>
+            <h3>Model Registry</h3>
+            <ul>
+              <li>Named versioning</li>
+              <li>Default version = production</li>
+              <li>Automatic end-to-end lineage</li>
+              <li>Tags &amp; aliases for discoverability</li>
+              <li>Promotion gates with thresholds</li>
+              <li>Deploy to Warehouse or SPCS</li>
+            </ul>
+          </div>
+        </div>
+
+        <div
+          style="margin-top:24px;padding:16px 24px;border-radius:12px;background:rgba(41,181,232,0.04);border:1px solid rgba(41,181,232,0.12);text-align:center;">
+          <span style="font-size:0.85em;color:rgba(255,255,255,0.6);">Next session: <strong
+              style="color:var(--sf-blue);">Distributed Training, HPO &amp; Advanced Deployment</strong></span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end .deck -->
+
+  <script>
+    (function () {
+      const slides = document.querySelectorAll('.slide');
+      const total = slides.length;
+      let current = 0;
+
+      function update() {
+        document.getElementById('slideNum').textContent = (current + 1) + ' / ' + total;
+        document.getElementById('progress').style.width = ((current + 1) / total * 100) + '%';
+      }
+
+      function goTo(idx) {
+        if (idx < 0 || idx >= total || idx === current) return;
+        for (let i = 0; i < total; i++) slides[i].classList.remove('active');
+        current = idx;
+        slides[current].classList.add('active');
+        update();
+      }
+
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); goTo(current + 1); }
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); goTo(current - 1); }
+        else if (e.key === 'Home') { e.preventDefault(); goTo(0); }
+        else if (e.key === 'End') { e.preventDefault(); goTo(total - 1); }
+      });
+
+      let tx = 0;
+      document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; });
+      document.addEventListener('touchend', e => { const d = tx - e.changedTouches[0].clientX; if (Math.abs(d) > 50) goTo(current + (d > 0 ? 1 : -1)); });
+
+      document.addEventListener('click', e => {
+        if (e.target.closest('a,button,input')) return;
+        const x = e.clientX / window.innerWidth;
+        if (x > 0.85) goTo(current + 1);
+        else if (x < 0.15) goTo(current - 1);
+      });
+
+      update();
+    })();
+  </script>
+
+</body>
+
+</html>

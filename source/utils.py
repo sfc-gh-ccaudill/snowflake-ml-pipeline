@@ -30,7 +30,12 @@ def get_env(key: str, default: Optional[str] = None) -> str:
     return value
 
 
-def get_session(connection_name: Optional[str] = None) -> Session:
+def get_session(
+    connection_name: Optional[str] = None,
+    database_name: Optional[str] = None,
+    schema_name: Optional[str] = None,
+    warehouse_name: Optional[str] = None,
+) -> Session:
     """
     Create Snowpark session.
 
@@ -49,6 +54,15 @@ def get_session(connection_name: Optional[str] = None) -> Session:
         if connection_name is None:
             connection_name = os.getenv("SNOWFLAKE_CONNECTION_NAME")
         session = Session.builder.config("connection_name", connection_name).create()
+
+    if database_name:
+        session.use_database(database_name)
+
+    if schema_name:
+        session.use_schema(schema_name)
+
+    if warehouse_name:
+        session.use_warehouse(warehouse_name)
 
     return session
 

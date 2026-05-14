@@ -173,30 +173,33 @@ def run(config, session: Session, version_name: str = None) -> dict:
     status = monitor.get_monitor_status(monitor_name)
     logger.info("Monitor status: %s", status.get("status"))
 
-    alert_name = None
+    alert_names = []
     if getattr(config.monitor, "drift_alert_enabled", False):
-        alert_name = config.monitor.drift_alert_name
-        logger.info(
-            "Setting up drift alert '%s' to retrain on drift > %s",
-            alert_name,
-            config.monitor.drift_threshold,
-        )
-        monitor.setup_drift_alert(
-            alert_name=alert_name,
-            monitor_name=monitor_name,
-            prediction_col="GLUCOSE_LEVEL",
-            drift_metric=config.monitor.drift_metric,
-            drift_threshold=config.monitor.drift_threshold,
-            schedule=config.monitor.drift_alert_schedule,
-            warehouse=warehouse,
-            retrain_root_task=config.monitor.retrain_root_task,
-        )
-        logger.info(
-            "Drift alert active — will EXECUTE TASK %s.%s.%s on drift",
-            db,
-            schema,
-            config.monitor.retrain_root_task,
-        )
+        for drift_alert in config.monitor.drift_alerts:
+            logger.info(
+                "Setting up drift alert '%s' on column '%s' (threshold: %s)",
+                drift_alert.alert_name,
+                drift_alert.column,
+                drift_alert.drift_threshold,
+            )
+            monitor.setup_drift_alert(
+                alert_name=drift_alert.alert_name,
+                monitor_name=monitor_name,
+                prediction_col=drift_alert.column,
+                drift_metric=drift_alert.drift_metric,
+                drift_threshold=drift_alert.drift_threshold,
+                schedule=drift_alert.schedule,
+                warehouse=warehouse,
+                retrain_root_task=config.monitor.retrain_root_task,
+            )
+            alert_names.append(drift_alert.alert_name)
+            logger.info(
+                "Drift alert '%s' active — will EXECUTE TASK %s.%s.%s on drift",
+                drift_alert.alert_name,
+                db,
+                schema,
+                config.monitor.retrain_root_task,
+            )
 
     logger.info("=== Step 5 complete — model monitoring active ===")
 
@@ -206,7 +209,7 @@ def run(config, session: Session, version_name: str = None) -> dict:
         "model_name": model_name,
         "version_name": version_name,
         "monitor_status": status.get("status"),
-        "drift_alert": alert_name,
+        "drift_alerts": alert_names,
     }
 
 
