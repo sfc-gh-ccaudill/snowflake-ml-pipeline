@@ -28,6 +28,9 @@ def train_func():
     from snowflake.ml.modeling.tune import get_tuner_context
     from xgboost import XGBClassifier
 
+    # == Establish Context for Trial ==
+    # Note: This is where the training function determines the
+    # hyperparameters for each specific trial
     ctx = get_tuner_context()
     params = ctx.get_hyper_params()
     datasets = ctx.get_dataset_map()

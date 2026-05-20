@@ -637,7 +637,7 @@
                     <div style="text-align:center;">
                         <div
                             style="width:180px;height:180px;border-radius:50%;margin:0 auto 24px;background:linear-gradient(135deg,rgba(41,181,232,0.15),rgba(139,92,246,0.15));border:3px solid rgba(41,181,232,0.3);display:flex;align-items:center;justify-content:center;font-size:4em;color:rgba(255,255,255,0.2);overflow:hidden;position:relative;">
-                            <img src="assets/profile.png" alt="Chris Caudill"
+                            <img src="../../assets/profile.png" alt="Chris Caudill"
                                 style="width:100%;height:100%;object-fit:cover;border-radius:50%;">
                         </div>
                         <h2 style="font-size:1.6em;font-weight:800;color:white;margin-bottom:6px;">Chris Caudill</h2>
@@ -1292,7 +1292,8 @@ job.wait()  <span style="color:rgba(255,255,255,0.35);"># blocks until done</spa
                                 style="color:#C792EA;">RUN</span> pip install snowflake-ml-python xgboost<br><span
                                 style="color:#C792EA;">COPY</span> train.py /app/<br><span
                                 style="color:#C792EA;">ENTRYPOINT</span> [<span style="color:#C3E88D;">"python"</span>,
-                            <span style="color:#C3E88D;">"train.py"</span>]</div>
+                            <span style="color:#C3E88D;">"train.py"</span>]
+                        </div>
                     </div>
                 </div>
 
@@ -1548,19 +1549,23 @@ job.wait()  <span style="color:rgba(255,255,255,0.35);"># blocks until done</spa
                                 <div
                                     style="display:flex;justify-content:space-between;font-size:0.78em;padding:8px 12px;border-radius:8px;background:rgba(41,181,232,0.06);border:1px solid rgba(41,181,232,0.15);">
                                     <span style="color:rgba(255,255,255,0.6);">Data loading</span><span
-                                        style="color:var(--sf-blue);font-weight:600;">DataConnector</span></div>
+                                        style="color:var(--sf-blue);font-weight:600;">DataConnector</span>
+                                </div>
                                 <div
                                     style="display:flex;justify-content:space-between;font-size:0.78em;padding:8px 12px;border-radius:8px;background:rgba(41,181,232,0.06);border:1px solid rgba(41,181,232,0.15);">
                                     <span style="color:rgba(255,255,255,0.6);">Distribution</span><span
-                                        style="color:var(--sf-blue);font-weight:600;">Built-in, auto</span></div>
+                                        style="color:var(--sf-blue);font-weight:600;">Built-in, auto</span>
+                                </div>
                                 <div
                                     style="display:flex;justify-content:space-between;font-size:0.78em;padding:8px 12px;border-radius:8px;background:rgba(41,181,232,0.06);border:1px solid rgba(41,181,232,0.15);">
                                     <span style="color:rgba(255,255,255,0.6);">GPU support</span><span
-                                        style="color:var(--sf-blue);font-weight:600;">use_gpu=True</span></div>
+                                        style="color:var(--sf-blue);font-weight:600;">use_gpu=True</span>
+                                </div>
                                 <div
                                     style="display:flex;justify-content:space-between;font-size:0.78em;padding:8px 12px;border-radius:8px;background:rgba(41,181,232,0.06);border:1px solid rgba(41,181,232,0.15);">
                                     <span style="color:rgba(255,255,255,0.6);">Worker scaling</span><span
-                                        style="color:var(--sf-blue);font-weight:600;">XGBScalingConfig</span></div>
+                                        style="color:var(--sf-blue);font-weight:600;">XGBScalingConfig</span>
+                                </div>
                             </div>
                         </div>
                         <div
@@ -1703,15 +1708,18 @@ booster = estimator.fit(
                                 <div
                                     style="display:flex;justify-content:space-between;font-size:0.78em;padding:8px 12px;border-radius:8px;background:rgba(41,181,232,0.06);border:1px solid rgba(41,181,232,0.15);">
                                     <span style="color:rgba(255,255,255,0.6);">randint(50, 300)</span><span
-                                        style="color:var(--sf-blue);">n_estimators</span></div>
+                                        style="color:var(--sf-blue);">n_estimators</span>
+                                </div>
                                 <div
                                     style="display:flex;justify-content:space-between;font-size:0.78em;padding:8px 12px;border-radius:8px;background:rgba(139,92,246,0.06);border:1px solid rgba(139,92,246,0.15);">
                                     <span style="color:rgba(255,255,255,0.6);">loguniform(0.001, 0.3)</span><span
-                                        style="color:#A78BFA;">learning_rate</span></div>
+                                        style="color:#A78BFA;">learning_rate</span>
+                                </div>
                                 <div
                                     style="display:flex;justify-content:space-between;font-size:0.78em;padding:8px 12px;border-radius:8px;background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.15);">
                                     <span style="color:rgba(255,255,255,0.6);">uniform(0.6, 1.0)</span><span
-                                        style="color:var(--sf-green);">subsample</span></div>
+                                        style="color:var(--sf-green);">subsample</span>
+                                </div>
                                 <div
                                     style="display:flex;justify-content:space-between;font-size:0.78em;padding:8px 12px;border-radius:8px;background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);">
                                     <span style="color:rgba(255,255,255,0.6);">choice([&apos;gbtree&apos;,
