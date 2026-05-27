@@ -122,11 +122,10 @@ snowflake-ml-prod/
 │   ├── 05_model_deployment.ipynb
 │   ├── 06_model_monitoring.ipynb
 │   ├── 07_streaming_inference.ipynb
-│   ├── 08_cleanup.ipynb
-│   └── deep_dive/
-│       └── feature_and_experiment/         # Advanced Feature Store + experiment notebooks
+│   └── 08_cleanup.ipynb
 └── docs/
-    └── DEMO_GUIDE.md                       # Live demo script and talking points
+    ├── DEMO_GUIDE.md                       # Live demo script and talking points
+    └── presentations/session1/              # End-to-end ML overview presentation
 ```
 
 ---
@@ -287,3 +286,4 @@ All pipeline behavior is controlled by `source/config.yaml`:
 
 - [Demo guide with live script and Q&A prep](docs/DEMO_GUIDE.md)
 - [Snowflake ML documentation](https://docs.snowflake.com/en/developer-guide/snowflake-ml/overview)
+- [Deep-dive workshop notebooks](https://github.com/ccaudill/snowflake-ml-deep-dive) — hands-on sessions covering Feature Store, ML Jobs, distributed training, HPO, deployment, and monitoring in depth
