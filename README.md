@@ -286,4 +286,4 @@ All pipeline behavior is controlled by `source/config.yaml`:
 
 - [Demo guide with live script and Q&A prep](docs/DEMO_GUIDE.md)
 - [Snowflake ML documentation](https://docs.snowflake.com/en/developer-guide/snowflake-ml/overview)
-- [Deep-dive workshop notebooks](https://github.com/ccaudill/snowflake-ml-deep-dive) — hands-on sessions covering Feature Store, ML Jobs, distributed training, HPO, deployment, and monitoring in depth
+- [Deep-dive workshop notebooks](https://github.com/sfc-gh-ccaudill/snowflake-ml-deep-dive) — hands-on sessions covering Feature Store, ML Jobs, distributed training, HPO, deployment, and monitoring in depth
